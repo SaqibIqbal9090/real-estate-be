@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/sequelize';
 import { Property } from './property.model';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { Op } from 'sequelize';
+import { Sequelize } from 'sequelize';
 
 @Injectable()
 export class PropertiesService {
@@ -174,14 +175,16 @@ export class PropertiesService {
     }
 
     // Filter by bedrooms (if bedrooms array contains the specified number)
-    if (bedrooms) {
-      where.bedrooms = { [Op.contains]: [bedrooms.toString()] };
-    }
+    // Temporarily disabled to debug JSON field issues
+    // if (bedrooms) {
+    //   where.bedrooms = Sequelize.literal(`bedrooms::jsonb @> '["${bedrooms}"]'::jsonb`);
+    // }
 
     // Filter by bathrooms (if bathsFull array contains the specified number)
-    if (bathrooms) {
-      where.bathsFull = { [Op.contains]: [bathrooms.toString()] };
-    }
+    // Temporarily disabled to debug JSON field issues
+    // if (bathrooms) {
+    //   where.bathsFull = Sequelize.literal(`"bathsFull"::jsonb @> '["${bathsFull}"]'::jsonb`);
+    // }
 
     const { count, rows } = await this.propertyModel.findAndCountAll({
       where,

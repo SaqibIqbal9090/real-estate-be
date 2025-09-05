@@ -43,7 +43,7 @@ export class PropertiesController {
   async findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-    @Query('search') search?: string,
+    @Query('searchTerm') searchTerm?: string,
     @Query('listType') listType?: string,
     @Query('minPrice') minPrice?: string,
     @Query('maxPrice') maxPrice?: string,
@@ -55,11 +55,12 @@ export class PropertiesController {
     const options = {
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 10,
-      search,
+      searchTerm,
       listType,
       minPrice: minPrice ? parseFloat(minPrice) : undefined,
       maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
       city,
+      
       state,
       bedrooms: bedrooms ? parseInt(bedrooms) : undefined,
       bathrooms: bathrooms ? parseInt(bathrooms) : undefined,
