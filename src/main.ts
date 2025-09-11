@@ -36,7 +36,7 @@ async function bootstrap() {
       'JWT-auth',
     )
     .addServer('http://localhost:3200', 'Development server')
-    .addServer('https://api.realestate.com', 'Production server')
+    .addServer('https://api.realestatemarketplaceintl.com/', 'Production server')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
