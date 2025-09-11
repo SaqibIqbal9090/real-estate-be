@@ -12,12 +12,14 @@ import {
   HttpStatus,
   HttpCode,
 } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { PropertiesService } from './properties.service';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { GenerateSignedUrlDto, SingleFileSignedUrlDto } from './dto/generate-signed-url.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { S3Service } from './s3.service';
 
+@ApiTags('Properties')
 @Controller('properties')
 export class PropertiesController {
   constructor(
@@ -28,6 +30,61 @@ export class PropertiesController {
   @Post()
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ 
+    summary: 'Create a new property',
+    description: 'Create a new property listing with all required details'
+  })
+  @ApiBody({ type: CreatePropertyDto })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Property successfully created',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Property created successfully' },
+        property: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'uuid' },
+            listType: { type: 'string', example: 'sale' },
+            listPrice: { type: 'number', example: 450000 },
+            streetNo: { type: 'string', example: '123' },
+            streetName: { type: 'string', example: 'Main' },
+            city: { type: 'string', example: 'Austin' },
+            state: { type: 'string', example: 'TX' },
+            zipCode: { type: 'string', example: '78701' },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Bad request - validation failed',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: { type: 'array', items: { type: 'string' } },
+        error: { type: 'string', example: 'Bad Request' }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Unauthorized - invalid or missing token',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'Unauthorized' }
+      }
+    }
+  })
   async create(@Body() createPropertyDto: CreatePropertyDto, @Request() req: any) {
     // Set the userId from the authenticated user
     createPropertyDto.userId = req.user.userId;
@@ -40,6 +97,56 @@ export class PropertiesController {
   }
 
   @Get()
+  @ApiOperation({ 
+    summary: 'Get all properties',
+    description: 'Retrieve a paginated list of properties with optional filtering'
+  })
+  @ApiQuery({ name: 'page', required: false, type: 'string', description: 'Page number', example: '1' })
+  @ApiQuery({ name: 'limit', required: false, type: 'string', description: 'Number of items per page', example: '10' })
+  @ApiQuery({ name: 'searchTerm', required: false, type: 'string', description: 'Search term for property search' })
+  @ApiQuery({ name: 'listType', required: false, type: 'string', description: 'Type of listing', enum: ['sale', 'lease', 'both'] })
+  @ApiQuery({ name: 'minPrice', required: false, type: 'string', description: 'Minimum price filter', example: '100000' })
+  @ApiQuery({ name: 'maxPrice', required: false, type: 'string', description: 'Maximum price filter', example: '500000' })
+  @ApiQuery({ name: 'city', required: false, type: 'string', description: 'City filter', example: 'Austin' })
+  @ApiQuery({ name: 'state', required: false, type: 'string', description: 'State filter', example: 'TX' })
+  @ApiQuery({ name: 'bedrooms', required: false, type: 'string', description: 'Number of bedrooms', example: '3' })
+  @ApiQuery({ name: 'bathrooms', required: false, type: 'string', description: 'Number of bathrooms', example: '2' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Properties retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        properties: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', example: 'uuid' },
+              listType: { type: 'string', example: 'sale' },
+              listPrice: { type: 'number', example: 450000 },
+              streetNo: { type: 'string', example: '123' },
+              streetName: { type: 'string', example: 'Main' },
+              city: { type: 'string', example: 'Austin' },
+              state: { type: 'string', example: 'TX' },
+              zipCode: { type: 'string', example: '78701' },
+              createdAt: { type: 'string', format: 'date-time' },
+              updatedAt: { type: 'string', format: 'date-time' }
+            }
+          }
+        },
+        pagination: {
+          type: 'object',
+          properties: {
+            page: { type: 'number', example: 1 },
+            limit: { type: 'number', example: 10 },
+            total: { type: 'number', example: 100 },
+            totalPages: { type: 'number', example: 10 }
+          }
+        }
+      }
+    }
+  })
   async findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -70,6 +177,46 @@ export class PropertiesController {
   }
 
   @Get('search')
+  @ApiOperation({ 
+    summary: 'Search properties',
+    description: 'Search properties by term with pagination'
+  })
+  @ApiQuery({ name: 'q', required: true, type: 'string', description: 'Search term', example: 'downtown austin' })
+  @ApiQuery({ name: 'page', required: false, type: 'string', description: 'Page number', example: '1' })
+  @ApiQuery({ name: 'limit', required: false, type: 'string', description: 'Number of items per page', example: '10' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Search results retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        properties: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', example: 'uuid' },
+              listType: { type: 'string', example: 'sale' },
+              listPrice: { type: 'number', example: 450000 },
+              streetNo: { type: 'string', example: '123' },
+              streetName: { type: 'string', example: 'Main' },
+              city: { type: 'string', example: 'Austin' },
+              state: { type: 'string', example: 'TX' },
+              zipCode: { type: 'string', example: '78701' }
+            }
+          }
+        },
+        pagination: {
+          type: 'object',
+          properties: {
+            page: { type: 'number', example: 1 },
+            limit: { type: 'number', example: 10 },
+            total: { type: 'number', example: 25 }
+          }
+        }
+      }
+    }
+  })
   async searchProperties(
     @Query('q') searchTerm: string,
     @Query('page') page?: string,
@@ -109,6 +256,50 @@ export class PropertiesController {
   }
 
   @Get(':id')
+  @ApiOperation({ 
+    summary: 'Get property by ID',
+    description: 'Retrieve a specific property by its ID'
+  })
+  @ApiParam({ name: 'id', description: 'Property ID', example: 'uuid' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Property retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Property retrieved successfully' },
+        property: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'uuid' },
+            listType: { type: 'string', example: 'sale' },
+            listPrice: { type: 'number', example: 450000 },
+            streetNo: { type: 'string', example: '123' },
+            streetName: { type: 'string', example: 'Main' },
+            city: { type: 'string', example: 'Austin' },
+            state: { type: 'string', example: 'TX' },
+            zipCode: { type: 'string', example: '78701' },
+            bedrooms: { type: 'array', items: { type: 'string' }, example: ['3'] },
+            bathsFull: { type: 'array', items: { type: 'string' }, example: ['2'] },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Property not found',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 404 },
+        message: { type: 'string', example: 'Property not found' },
+        error: { type: 'string', example: 'Not Found' }
+      }
+    }
+  })
   async findOne(@Param('id') id: string) {
     const property = await this.propertiesService.findOne(id);
     return {
@@ -223,6 +414,45 @@ export class PropertiesController {
   // S3 Signed URL endpoints for image uploads
   @Post('upload/signed-url')
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ 
+    summary: 'Generate multiple signed URLs',
+    description: 'Generate signed URLs for multiple file uploads to S3'
+  })
+  @ApiBody({ type: GenerateSignedUrlDto })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Signed URLs generated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Signed URLs generated successfully' },
+        signedUrls: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              fileName: { type: 'string', example: 'property-image-1.jpg' },
+              signedUrl: { type: 'string', example: 'https://s3.amazonaws.com/bucket/key?signature...' },
+              fileKey: { type: 'string', example: 'properties/uuid/property-image-1.jpg' }
+            }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Unauthorized - invalid or missing token',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'Unauthorized' }
+      }
+    }
+  })
   async generateSignedUrl(@Body() generateSignedUrlDto: GenerateSignedUrlDto) {
     const { files, expiresIn } = generateSignedUrlDto;
     
@@ -236,6 +466,36 @@ export class PropertiesController {
 
   @Post('upload/single-signed-url')
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ 
+    summary: 'Generate single signed URL',
+    description: 'Generate a signed URL for a single file upload to S3'
+  })
+  @ApiBody({ type: SingleFileSignedUrlDto })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Signed URL generated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Signed URL generated successfully' },
+        signedUrl: { type: 'string', example: 'https://s3.amazonaws.com/bucket/key?signature...' },
+        fileKey: { type: 'string', example: 'properties/uuid/property-image.jpg' }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Unauthorized - invalid or missing token',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'Unauthorized' }
+      }
+    }
+  })
   async generateSingleSignedUrl(@Body() singleFileDto: SingleFileSignedUrlDto) {
     const { fileName, contentType, expiresIn } = singleFileDto;
     
