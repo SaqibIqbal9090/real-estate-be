@@ -49,6 +49,18 @@ export class User extends Model<User> {
   })
   declare password: string;
 
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  declare passwordResetToken: string | null;
+
+  @Column({
+    type: DataType.DATE,
+    allowNull: true,
+  })
+  declare passwordResetExpires: Date | null;
+
   @CreatedAt
   declare createdAt: Date;
 

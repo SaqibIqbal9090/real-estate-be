@@ -1,9 +1,15 @@
-import { Injectable, UnauthorizedException, ConflictException, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { VerifyResetTokenDto } from './dto/verify-reset-token.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { EmailService } from './email.service';
+import { User } from '../users/user.model';
 import * as bcrypt from 'bcryptjs';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class AuthService {
@@ -12,6 +18,7 @@ export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    private emailService: EmailService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -112,5 +119,139 @@ export class AuthService {
       return result;
     }
     return null;
+  }
+
+  async forgotPassword(forgotPasswordDto: ForgotPasswordDto): Promise<{ message: string }> {
+    const { email } = forgotPasswordDto;
+
+    this.logger.debug(`Forgot password request for email: ${email}`);
+
+    // Find user by email
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      // For security reasons, we don't reveal if the email exists or not
+      this.logger.debug(`User not found for email: ${email}, but returning success message`);
+      return {
+        message: 'If an account with that email exists, a password reset link has been sent.',
+      };
+    }
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetExpires = new Date();
+    resetExpires.setHours(resetExpires.getHours() + 1); // Token expires in 1 hour
+
+    // Save token and expiry to user
+    await user.update({
+      passwordResetToken: resetToken,
+      passwordResetExpires: resetExpires,
+    });
+
+    this.logger.debug(`Password reset token generated for user: ${user.id}`);
+
+    // Send password reset email
+    try {
+      await this.emailService.sendPasswordResetEmail(email, resetToken);
+      this.logger.debug(`Password reset email sent to: ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send password reset email to ${email}:`, error.message);
+      // Clear the token if email sending failed
+      await user.update({
+        passwordResetToken: null,
+        passwordResetExpires: null,
+      });
+      throw new Error('Failed to send password reset email. Please try again.');
+    }
+
+    return {
+      message: 'If an account with that email exists, a password reset link has been sent.',
+    };
+  }
+
+  async verifyResetToken(verifyResetTokenDto: VerifyResetTokenDto): Promise<{ message: string; valid: boolean }> {
+    const { token } = verifyResetTokenDto;
+
+    this.logger.debug(`Token verification request for token: ${token.substring(0, 8)}...`);
+
+    // Find user by reset token
+    const user = await User.findOne({
+      where: {
+        passwordResetToken: token,
+      },
+    });
+
+    if (!user) {
+      this.logger.debug(`No user found with token: ${token.substring(0, 8)}...`);
+      return {
+        message: 'Invalid or expired reset token.',
+        valid: false,
+      };
+    }
+
+    // Check if token has expired
+    if (user.passwordResetExpires && new Date() > user.passwordResetExpires) {
+      this.logger.debug(`Token expired for user: ${user.id}`);
+      // Clear expired token
+      await user.update({
+        passwordResetToken: null,
+        passwordResetExpires: null,
+      });
+      return {
+        message: 'Reset token has expired.',
+        valid: false,
+      };
+    }
+
+    this.logger.debug(`Token is valid for user: ${user.id}`);
+    return {
+      message: 'Reset token is valid.',
+      valid: true,
+    };
+  }
+
+  async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<{ message: string }> {
+    const { token, password } = resetPasswordDto;
+
+    this.logger.debug(`Password reset request for token: ${token.substring(0, 8)}...`);
+
+    // Find user by reset token
+    const user = await User.findOne({
+      where: {
+        passwordResetToken: token,
+      },
+    });
+
+    if (!user) {
+      this.logger.debug(`No user found with token: ${token.substring(0, 8)}...`);
+      throw new BadRequestException('Invalid or expired reset token.');
+    }
+
+    // Check if token has expired
+    if (user.passwordResetExpires && new Date() > user.passwordResetExpires) {
+      this.logger.debug(`Token expired for user: ${user.id}`);
+      // Clear expired token
+      await user.update({
+        passwordResetToken: null,
+        passwordResetExpires: null,
+      });
+      throw new BadRequestException('Reset token has expired.');
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    this.logger.debug(`New password hashed for user: ${user.id}`);
+
+    // Update user password and clear reset token
+    await user.update({
+      password: hashedPassword,
+      passwordResetToken: null,
+      passwordResetExpires: null,
+    });
+
+    this.logger.debug(`Password reset successful for user: ${user.id}`);
+
+    return {
+      message: 'Password has been reset successfully.',
+    };
   }
 } 

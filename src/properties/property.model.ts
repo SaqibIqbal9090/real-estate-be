@@ -26,9 +26,6 @@ export class Property extends Model<Property> {
   @Column({
     type: DataType.STRING,
     allowNull: false,
-    validate: {
-      isIn: [['sale', 'lease', 'both']],
-    },
   })
   listType: string;
 
@@ -517,25 +514,25 @@ export class Property extends Model<Property> {
     type: DataType.JSON,
     allowNull: true,
   })
-  bedrooms: string[];
+  bedrooms: number;
 
   @Column({
     type: DataType.JSON,
     allowNull: true,
   })
-  bedroomsMax: string[];
+  bedroomsMax: number;
 
   @Column({
     type: DataType.JSON,
     allowNull: true,
   })
-  bathsFull: string[];
+  bathsFull: number;
 
   @Column({
     type: DataType.JSON,
     allowNull: true,
   })
-  bathshalf: string[];
+  bathshalf: number;
 
   @Column({
     type: DataType.JSON,
@@ -614,106 +611,106 @@ export class Property extends Model<Property> {
 
   // Additional Property Features (frontend sends these)
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  frontDoorFaces: string;
+  frontDoorFaces: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  ovenType: string;
+  ovenType: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  stoveType: string;
+  stoveType: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  washerDryerConnection: string;
+  washerDryerConnection: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  privatePoolDescription: string;
+  privatePoolDescription: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  interiorFeatures: string;
+  interiorFeatures: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  flooring: string;
+  flooring: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  exteriorDescription: string;
+  exteriorDescription: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  constructionMaterials: string;
+  constructionMaterials: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  roofDescription: string;
+  roofDescription: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  foundationDescription: string;
+  foundationDescription: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  energyFeatures: string;
+  energyFeatures: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  greenEnergyCertifications: string;
+  greenEnergyCertifications: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  heatingSystemDescription: string;
+  heatingSystemDescription: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  coolingSystemDescription: string;
+  coolingSystemDescription: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  waterSewerDescription: string;
+  waterSewerDescription: string[];
 
   @Column({
-    type: DataType.STRING,
+    type: DataType.JSON,
     allowNull: true,
   })
-  streetSurface: string;
+  streetSurface: string[];
 
   // HQA Information
   @Column({
@@ -910,9 +907,6 @@ export class Property extends Model<Property> {
   @Column({
     type: DataType.STRING,
     allowNull: true,
-    validate: {
-      isEmail: true,
-    },
   })
   sellerEmail: string;
 
@@ -1135,7 +1129,25 @@ export class Property extends Model<Property> {
     type: DataType.JSON,
     allowNull: true,
   })
-  images: string[];
+  images: Array<{ image_url: string }>;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  golfCourseName: string;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  poolArea: string;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  poolPrivate: string;
 
   // Relationships
   @ForeignKey(() => User)

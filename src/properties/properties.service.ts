@@ -305,14 +305,16 @@ export class PropertiesService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    const property = await this.findOne(id);
+    const propertyInstance = await this.propertyModel.findByPk(id);
+    if (!propertyInstance) {
+      throw new NotFoundException(`Property with ID ${id} not found`);
+    }
 
-    // Check if user owns the property
-    if (property.userId !== userId) {
+    if (propertyInstance.userId !== userId) {
       throw new ForbiddenException('You can only delete your own properties');
     }
 
-    await property.destroy();
+    await propertyInstance.destroy();
   }
 
   async searchProperties(searchTerm: string, options: {

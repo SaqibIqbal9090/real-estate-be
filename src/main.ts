@@ -9,12 +9,7 @@ async function bootstrap() {
   // Enable CORS
   app.enableCors();
   
-  // Enable validation
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-  }));
+  // Backend validation disabled per requirements
 
   // Swagger configuration
   const config = new DocumentBuilder()

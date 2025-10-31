@@ -104,7 +104,7 @@ export class PropertiesController {
   @ApiQuery({ name: 'page', required: false, type: 'string', description: 'Page number', example: '1' })
   @ApiQuery({ name: 'limit', required: false, type: 'string', description: 'Number of items per page', example: '10' })
   @ApiQuery({ name: 'searchTerm', required: false, type: 'string', description: 'Search term for property search' })
-  @ApiQuery({ name: 'listType', required: false, type: 'string', description: 'Type of listing', enum: ['sale', 'lease', 'both'] })
+  @ApiQuery({ name: 'listType', required: false, type: 'string', description: 'Type of listing' })
   @ApiQuery({ name: 'minPrice', required: false, type: 'string', description: 'Minimum price filter', example: '100000' })
   @ApiQuery({ name: 'maxPrice', required: false, type: 'string', description: 'Maximum price filter', example: '500000' })
   @ApiQuery({ name: 'city', required: false, type: 'string', description: 'City filter', example: 'Austin' })
@@ -506,5 +506,19 @@ export class PropertiesController {
       signedUrl: result.signedUrl,
       fileKey: result.fileKey,
     };
+  }
+
+  @Delete('upload/file')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Delete a file from S3',
+    description: 'Delete an uploaded file from S3 using its fileKey'
+  })
+  @ApiQuery({ name: 'fileKey', required: true, type: 'string', description: 'S3 object key to delete' })
+  @ApiResponse({ status: 200, description: 'File deleted successfully' })
+  async deleteFile(@Query('fileKey') fileKey: string) {
+    await this.s3Service.deleteObject(fileKey);
+    return { message: 'File deleted successfully' };
   }
 } 
