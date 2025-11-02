@@ -30,6 +30,9 @@
  * - And many more specialized fields for comprehensive property documentation
  */
 export class CreatePropertyDto {
+  // Property Status
+  status?: 'draft' | 'published';
+
   // Listing Information
   listType: string;
 

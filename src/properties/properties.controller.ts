@@ -33,7 +33,7 @@ export class PropertiesController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ 
     summary: 'Create a new property',
-    description: 'Create a new property listing with all required details'
+    description: 'Create a new property listing. Use status="draft" to save as incomplete (minimal validation) or status="published" to save as complete (full validation required). Defaults to draft if status is not provided.'
   })
   @ApiBody({ type: CreatePropertyDto })
   @ApiResponse({ 
@@ -47,6 +47,7 @@ export class PropertiesController {
           type: 'object',
           properties: {
             id: { type: 'string', example: 'uuid' },
+            status: { type: 'string', example: 'draft', enum: ['draft', 'published'] },
             listType: { type: 'string', example: 'sale' },
             listPrice: { type: 'number', example: 450000 },
             streetNo: { type: 'string', example: '123' },
@@ -89,9 +90,16 @@ export class PropertiesController {
     // Set the userId from the authenticated user
     createPropertyDto.userId = req.user.userId;
     
+    // Set default status to 'draft' if not provided
+    if (!createPropertyDto.status) {
+      createPropertyDto.status = 'draft';
+    }
+    
     const property = await this.propertiesService.create(createPropertyDto);
     return {
-      message: 'Property created successfully',
+      message: property.status === 'published' 
+        ? 'Property created and published successfully' 
+        : 'Property saved as draft successfully',
       property,
     };
   }
@@ -103,12 +111,10 @@ export class PropertiesController {
   })
   @ApiQuery({ name: 'page', required: false, type: 'string', description: 'Page number', example: '1' })
   @ApiQuery({ name: 'limit', required: false, type: 'string', description: 'Number of items per page', example: '10' })
-  @ApiQuery({ name: 'searchTerm', required: false, type: 'string', description: 'Search term for property search' })
-  @ApiQuery({ name: 'listType', required: false, type: 'string', description: 'Type of listing' })
+  @ApiQuery({ name: 'zipCode', required: false, type: 'string', description: 'Filter by ZIP code (exact match)', example: '78701' })
   @ApiQuery({ name: 'minPrice', required: false, type: 'string', description: 'Minimum price filter', example: '100000' })
   @ApiQuery({ name: 'maxPrice', required: false, type: 'string', description: 'Maximum price filter', example: '500000' })
-  @ApiQuery({ name: 'city', required: false, type: 'string', description: 'City filter', example: 'Austin' })
-  @ApiQuery({ name: 'state', required: false, type: 'string', description: 'State filter', example: 'TX' })
+  @ApiQuery({ name: 'propertyType', required: false, type: 'string', description: 'Property type filter', example: 'Single Family' })
   @ApiQuery({ name: 'bedrooms', required: false, type: 'string', description: 'Number of bedrooms', example: '3' })
   @ApiQuery({ name: 'bathrooms', required: false, type: 'string', description: 'Number of bathrooms', example: '2' })
   @ApiResponse({ 
@@ -150,25 +156,20 @@ export class PropertiesController {
   async findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-    @Query('searchTerm') searchTerm?: string,
-    @Query('listType') listType?: string,
+    @Query('zipCode') zipCode?: string,
     @Query('minPrice') minPrice?: string,
     @Query('maxPrice') maxPrice?: string,
-    @Query('city') city?: string,
-    @Query('state') state?: string,
+    @Query('propertyType') propertyType?: string,
     @Query('bedrooms') bedrooms?: string,
     @Query('bathrooms') bathrooms?: string,
   ) {
     const options = {
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 10,
-      searchTerm,
-      listType,
+      zipCode,
+      propertyType: propertyType ? propertyType.split(',').filter(t => t.trim()) : undefined,
       minPrice: minPrice ? parseFloat(minPrice) : undefined,
       maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
-      city,
-      
-      state,
       bedrooms: bedrooms ? parseInt(bedrooms) : undefined,
       bathrooms: bathrooms ? parseInt(bathrooms) : undefined,
     };
@@ -308,8 +309,88 @@ export class PropertiesController {
     };
   }
 
+  @Patch(':id/publish')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ 
+    summary: 'Publish a draft property',
+    description: 'Convert a draft property to published status. Validates that all required fields are present before publishing.'
+  })
+  @ApiParam({ name: 'id', description: 'Property ID', example: 'uuid' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Property published successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Property published successfully' },
+        property: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'uuid' },
+            status: { type: 'string', example: 'published' },
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Bad request - missing required fields for publishing',
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Property not found',
+  })
+  @ApiResponse({ 
+    status: 403, 
+    description: 'Forbidden - not your property',
+  })
+  async publish(@Param('id') id: string, @Request() req: any) {
+    const property = await this.propertiesService.publish(id, req.user.userId);
+    return {
+      message: 'Property published successfully',
+      property,
+    };
+  }
+
+  @Patch(':id/unpublish')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ 
+    summary: 'Unpublish a property (convert to draft)',
+    description: 'Convert a published property back to draft status. This will hide it from public listings.'
+  })
+  @ApiParam({ name: 'id', description: 'Property ID', example: 'uuid' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Property unpublished successfully',
+  })
+  async unpublish(@Param('id') id: string, @Request() req: any) {
+    const property = await this.propertiesService.unpublish(id, req.user.userId);
+    return {
+      message: 'Property unpublished successfully',
+      property,
+    };
+  }
+
   @Patch(':id')
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ 
+    summary: 'Update a property',
+    description: 'Update property details. To publish a draft, include status: "published" in the body, or use the /properties/:id/publish endpoint.'
+  })
+  @ApiParam({ name: 'id', description: 'Property ID', example: 'uuid' })
+  @ApiBody({ type: CreatePropertyDto, required: false })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Property updated successfully',
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Bad request - validation failed or missing required fields for publishing',
+  })
   async update(
     @Param('id') id: string,
     @Body() updatePropertyDto: Partial<CreatePropertyDto>,
@@ -317,7 +398,9 @@ export class PropertiesController {
   ) {
     const property = await this.propertiesService.update(id, updatePropertyDto, req.user.userId);
     return {
-      message: 'Property updated successfully',
+      message: property.status === 'published' && updatePropertyDto.status === 'published'
+        ? 'Property updated and published successfully'
+        : 'Property updated successfully',
       property,
     };
   }

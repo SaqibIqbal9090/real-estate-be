@@ -22,6 +22,14 @@ export class Property extends Model<Property> {
   })
   declare id: string;
 
+  // Property Status
+  @Column({
+    type: DataType.ENUM('draft', 'published'),
+    defaultValue: 'draft',
+    allowNull: false,
+  })
+  status: 'draft' | 'published';
+
   // Listing Information
   @Column({
     type: DataType.STRING,

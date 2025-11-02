@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Property } from './property.model';
 import { CreatePropertyDto } from './dto/create-property.dto';
@@ -108,11 +108,43 @@ export class PropertiesService {
     // Map frontend data to database format
     const propertyData = this.mapFrontendToDatabaseFormat(createPropertyDto);
     
+    // Set default status to 'draft' if not provided
+    const status = propertyData.status || 'draft';
+    
+    // Validate required fields only if status is 'published'
+    if (status === 'published') {
+      this.validateRequiredFields(createPropertyDto);
+    }
+    
+    // Set status in property data
+    propertyData.status = status;
+    
     // Create property with all data
     const createdProperty = await this.propertyModel.create(propertyData as any);
     
     // Return the exact same structure as the payload
     return this.mapPropertyToFrontendFormat(createdProperty.toJSON());
+  }
+
+  // Validate required fields for published properties
+  private validateRequiredFields(propertyDto: CreatePropertyDto): void {
+    const requiredFields = [
+      'listType',
+      'listPrice',
+      'streetNo',
+      'streetName',
+      'city',
+      'state',
+      'zipCode',
+    ];
+
+    const missingFields = requiredFields.filter(field => !propertyDto[field]);
+    
+    if (missingFields.length > 0) {
+      throw new BadRequestException(
+        `Cannot publish property. Missing required fields: ${missingFields.join(', ')}`
+      );
+    }
   }
 
   async findAll(options: {
@@ -124,8 +156,11 @@ export class PropertiesService {
     maxPrice?: number;
     city?: string;
     state?: string;
+    zipCode?: string;
     bedrooms?: number;
     bathrooms?: number;
+    propertyType?: string | string[];
+    includeDrafts?: boolean;
   } = {}): Promise<{ properties: any[]; total: number; page: number; totalPages: number }> {
     const {
       page = 1,
@@ -136,21 +171,19 @@ export class PropertiesService {
       maxPrice,
       city,
       state,
+      zipCode,
       bedrooms,
       bathrooms,
+      propertyType,
+      includeDrafts = false,
     } = options;
 
     const offset = (page - 1) * limit;
     const where: any = {};
 
-    // Search functionality
-    if (search) {
-      where[Op.or] = [
-        { streetName: { [Op.iLike]: `%${search}%` } },
-        { city: { [Op.iLike]: `%${search}%` } },
-        { state: { [Op.iLike]: `%${search}%` } },
-        { subDivision: { [Op.iLike]: `%${search}%` } },
-      ];
+    // Only show published properties in public listings unless includeDrafts is true
+    if (!includeDrafts) {
+      where.status = 'published';
     }
 
     // Filter by list type
@@ -174,17 +207,57 @@ export class PropertiesService {
       where.state = { [Op.iLike]: `%${state}%` };
     }
 
-    // Filter by bedrooms (if bedrooms array contains the specified number)
-    // Temporarily disabled to debug JSON field issues
-    // if (bedrooms) {
-    //   where.bedrooms = Sequelize.literal(`bedrooms::jsonb @> '["${bedrooms}"]'::jsonb`);
-    // }
+    // Filter by zip code (exact match)
+    if (zipCode) {
+      where.zipCode = zipCode;
+    }
 
-    // Filter by bathrooms (if bathsFull array contains the specified number)
-    // Temporarily disabled to debug JSON field issues
-    // if (bathrooms) {
-    //   where.bathsFull = Sequelize.literal(`"bathsFull"::jsonb @> '["${bathsFull}"]'::jsonb`);
-    // }
+    // Build AND conditions for complex filters
+    const andConditions: any[] = [];
+
+    // Search functionality
+    if (search) {
+      andConditions.push({
+        [Op.or]: [
+          { streetName: { [Op.iLike]: `%${search}%` } },
+          { city: { [Op.iLike]: `%${search}%` } },
+          { state: { [Op.iLike]: `%${search}%` } },
+          { subDivision: { [Op.iLike]: `%${search}%` } },
+        ],
+      });
+    }
+
+    // Filter by property type (propertyType is stored as JSON array)
+    if (propertyType) {
+      const propertyTypes = Array.isArray(propertyType) ? propertyType : [propertyType];
+      const propertyTypeConditions = propertyTypes.map((type: string) => {
+        // Check if the JSON array contains the property type (case-insensitive)
+        return Sequelize.literal(`EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text("propertyType"::jsonb) AS element
+          WHERE LOWER(element) = LOWER('${type.replace(/'/g, "''")}')
+        )`);
+      });
+      andConditions.push({ [Op.or]: propertyTypeConditions });
+    }
+
+    // Filter by bedrooms (bedrooms is stored as INTEGER after migration)
+    if (bedrooms !== undefined && bedrooms !== null) {
+      andConditions.push({
+        bedrooms: bedrooms,
+      });
+    }
+
+    // Filter by bathrooms (bathsFull is stored as INTEGER after migration)
+    if (bathrooms !== undefined && bathrooms !== null) {
+      andConditions.push({
+        bathsFull: bathrooms,
+      });
+    }
+
+    // Apply all AND conditions
+    if (andConditions.length > 0) {
+      where[Op.and] = andConditions;
+    }
 
     const { count, rows } = await this.propertyModel.findAndCountAll({
       where,
@@ -249,12 +322,19 @@ export class PropertiesService {
   async findByUserId(userId: string, options: {
     page?: number;
     limit?: number;
+    status?: 'draft' | 'published';
   } = {}): Promise<{ properties: any[]; total: number; page: number; totalPages: number }> {
-    const { page = 1, limit = 10 } = options;
+    const { page = 1, limit = 10, status } = options;
     const offset = (page - 1) * limit;
 
+    const where: any = { userId };
+    // Allow filtering by status, but by default show all (drafts and published) for user's own properties
+    if (status) {
+      where.status = status;
+    }
+
     const { count, rows } = await this.propertyModel.findAndCountAll({
-      where: { userId },
+      where,
       limit,
       offset,
       order: [['createdAt', 'DESC']],
@@ -294,6 +374,13 @@ export class PropertiesService {
     // Map frontend fields to database fields for update
     const updateData = this.mapFrontendToDatabaseFormat(updatePropertyDto);
 
+    // If status is being changed to 'published', validate required fields
+    if (updateData.status === 'published' && property.status !== 'published') {
+      // Merge existing property data with update data for validation
+      const mergedData = { ...property, ...updatePropertyDto };
+      this.validateRequiredFields(mergedData as CreatePropertyDto);
+    }
+
     // Update the property and return the updated instance
     if (!propertyDirect) {
       throw new NotFoundException(`Property with ID ${id} not found`);
@@ -301,6 +388,59 @@ export class PropertiesService {
     const updatedProperty = await propertyDirect.update(updateData as any);
     
     // Fetch the updated property with user information
+    return this.findOne(id);
+  }
+
+  async publish(id: string, userId: string): Promise<any> {
+    const property = await this.findOne(id);
+
+    // Check if user owns the property
+    if (property.userId !== userId) {
+      throw new ForbiddenException('You can only publish your own properties');
+    }
+
+    // Check if already published
+    if (property.status === 'published') {
+      return property;
+    }
+
+    // Validate required fields before publishing
+    this.validateRequiredFields(property as CreatePropertyDto);
+
+    // Update status to published
+    const propertyDirect = await this.propertyModel.findByPk(id);
+    if (!propertyDirect) {
+      throw new NotFoundException(`Property with ID ${id} not found`);
+    }
+
+    await propertyDirect.update({ status: 'published' });
+
+    // Return updated property
+    return this.findOne(id);
+  }
+
+  async unpublish(id: string, userId: string): Promise<any> {
+    const property = await this.findOne(id);
+
+    // Check if user owns the property
+    if (property.userId !== userId) {
+      throw new ForbiddenException('You can only unpublish your own properties');
+    }
+
+    // Check if already draft
+    if (property.status === 'draft') {
+      return property;
+    }
+
+    // Update status to draft
+    const propertyDirect = await this.propertyModel.findByPk(id);
+    if (!propertyDirect) {
+      throw new NotFoundException(`Property with ID ${id} not found`);
+    }
+
+    await propertyDirect.update({ status: 'draft' });
+
+    // Return updated property
     return this.findOne(id);
   }
 
@@ -320,11 +460,12 @@ export class PropertiesService {
   async searchProperties(searchTerm: string, options: {
     page?: number;
     limit?: number;
+    includeDrafts?: boolean;
   } = {}): Promise<{ properties: any[]; total: number; page: number; totalPages: number }> {
-    const { page = 1, limit = 10 } = options;
+    const { page = 1, limit = 10, includeDrafts = false } = options;
     const offset = (page - 1) * limit;
 
-    const where = {
+    const where: any = {
       [Op.or]: [
         { streetName: { [Op.iLike]: `%${searchTerm}%` } },
         { city: { [Op.iLike]: `%${searchTerm}%` } },
@@ -334,6 +475,11 @@ export class PropertiesService {
         { legalDescription: { [Op.iLike]: `%${searchTerm}%` } },
       ],
     };
+
+    // Only show published properties in public search unless includeDrafts is true
+    if (!includeDrafts) {
+      where.status = 'published';
+    }
 
     const { count, rows } = await this.propertyModel.findAndCountAll({
       where,
