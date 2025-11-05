@@ -117,6 +117,9 @@ export class PropertiesController {
   @ApiQuery({ name: 'propertyType', required: false, type: 'string', description: 'Property type filter', example: 'Single Family' })
   @ApiQuery({ name: 'bedrooms', required: false, type: 'string', description: 'Number of bedrooms', example: '3' })
   @ApiQuery({ name: 'bathrooms', required: false, type: 'string', description: 'Number of bathrooms', example: '2' })
+  @ApiQuery({ name: 'minSqft', required: false, type: 'string', description: 'Minimum square footage', example: '1000' })
+  @ApiQuery({ name: 'maxSqft', required: false, type: 'string', description: 'Maximum square footage', example: '5000' })
+  @ApiQuery({ name: 'amenities', required: false, type: 'string', description: 'Comma-separated list of amenities', example: 'crown-molding,balcony' })
   @ApiResponse({ 
     status: 200, 
     description: 'Properties retrieved successfully',
@@ -162,6 +165,9 @@ export class PropertiesController {
     @Query('propertyType') propertyType?: string,
     @Query('bedrooms') bedrooms?: string,
     @Query('bathrooms') bathrooms?: string,
+    @Query('minSqft') minSqft?: string,
+    @Query('maxSqft') maxSqft?: string,
+    @Query('amenities') amenities?: string,
   ) {
     const options = {
       page: page ? parseInt(page) : 1,
@@ -172,6 +178,9 @@ export class PropertiesController {
       maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
       bedrooms: bedrooms ? parseInt(bedrooms) : undefined,
       bathrooms: bathrooms ? parseInt(bathrooms) : undefined,
+      minSqft: minSqft ? parseFloat(minSqft) : undefined,
+      maxSqft: maxSqft ? parseFloat(maxSqft) : undefined,
+      amenities: amenities ? amenities.split(',').map(a => a.trim()).filter(a => a) : undefined,
     };
 
     return this.propertiesService.findAll(options);

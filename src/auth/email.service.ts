@@ -32,7 +32,7 @@ export class EmailService {
       const mailOptions = {
         from: this.configService.get<string>('FROM_EMAIL') || 'noreply@realestate.com',
         to: email,
-        subject: 'Password Reset Request - Real Estate App',
+        subject: 'Password Reset Request - Real Estate Marketplace App',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <h2 style="color: #333;">Password Reset Request</h2>

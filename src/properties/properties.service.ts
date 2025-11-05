@@ -58,19 +58,40 @@ export class PropertiesService {
     };
   }
 
+  // Helper function to convert string values to null for numeric fields
+  private convertToNumeric(value: any): number | null {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    if (typeof value === 'number') {
+      return isNaN(value) ? null : value;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim().toLowerCase();
+      // Convert empty strings, "no", "yes" to null
+      if (trimmed === '' || trimmed === 'no' || trimmed === 'yes' || trimmed === 'n/a' || trimmed === 'na') {
+        return null;
+      }
+      // Try to parse as number
+      const parsed = parseFloat(trimmed);
+      return isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  }
+
   // Helper function to map frontend data to database format
   private mapFrontendToDatabaseFormat(propertyData: any): any {
-    return {
+    const mapped = {
       ...propertyData,
       // Map rooms to the correct field
       rooms: propertyData.rooms || propertyData.room,
       // Map other fields that might have different names
       garageDimensions: propertyData.garageDimensions || propertyData.garadgeDimenssion,
-      garageAptQtrsSqFt: propertyData.garageAptQtrsSqFt,
+      garageAptQtrsSqFt: this.convertToNumeric(propertyData.garageAptQtrsSqFt),
       sqftSource: propertyData.sqftSource || propertyData.SqftSource,
-      guestHouseSqFt: propertyData.guestHouseSqFt || propertyData.guestHouseSqft,
+      guestHouseSqFt: this.convertToNumeric(propertyData.guestHouseSqFt || propertyData.guestHouseSqft),
       maintenanceFee: propertyData.maintenanceFee || propertyData.maintainanceFee,
-      maintenanceFeeAmount: propertyData.maintenanceFeeAmount || propertyData.maintainanceFeeAmount,
+      maintenanceFeeAmount: this.convertToNumeric(propertyData.maintenanceFeeAmount || propertyData.maintainanceFeeAmount),
       maintenanceFeePaymentSched: propertyData.maintenanceFeePaymentSched || propertyData.maintainanceFeeSche,
       maintenanceFeeIncludes: propertyData.maintenanceFeeIncludes || propertyData.maintananceFeeIncludes,
       listTeamID: propertyData.listTeamID || propertyData.teamId,
@@ -101,7 +122,17 @@ export class PropertiesService {
       mandatoryHOAMgmtCoName: propertyData.mandatoryHOAMgmtCoName,
       mandatoryHOAMgmtCoPhone: propertyData.mandatoryHOAMgmtCoPhone,
       mandatoryHOAMgmtCoWebsite: propertyData.mandatoryHOAMgmtCoWebsite,
+      // Convert numeric fields that might receive string values
+      variableCompensation: this.convertToNumeric(propertyData.variableCompensation),
+      otherMandatoryFeesAmount: this.convertToNumeric(propertyData.otherMandatoryFeesAmount),
+      maintainanceFeeAmount: this.convertToNumeric(propertyData.maintainanceFeeAmount),
+      taxes: this.convertToNumeric(propertyData.taxes),
+      totalTaxRate: this.convertToNumeric(propertyData.totalTaxRate),
+      buildingSqft: this.convertToNumeric(propertyData.buildingSqft),
+      lotSize: this.convertToNumeric(propertyData.lotSize),
+      guestHouseSqft: this.convertToNumeric(propertyData.guestHouseSqft),
     };
+    return mapped;
   }
 
   async create(createPropertyDto: CreatePropertyDto): Promise<Property> {
@@ -160,6 +191,9 @@ export class PropertiesService {
     bedrooms?: number;
     bathrooms?: number;
     propertyType?: string | string[];
+    minSqft?: number;
+    maxSqft?: number;
+    amenities?: string[];
     includeDrafts?: boolean;
   } = {}): Promise<{ properties: any[]; total: number; page: number; totalPages: number }> {
     const {
@@ -175,6 +209,9 @@ export class PropertiesService {
       bedrooms,
       bathrooms,
       propertyType,
+      minSqft,
+      maxSqft,
+      amenities,
       includeDrafts = false,
     } = options;
 
@@ -254,9 +291,39 @@ export class PropertiesService {
       });
     }
 
+    // Filter by square footage range (buildingSqft)
+    if (minSqft !== undefined && minSqft !== null) {
+      where.buildingSqft = where.buildingSqft || {};
+      where.buildingSqft[Op.gte] = minSqft;
+    }
+    if (maxSqft !== undefined && maxSqft !== null) {
+      where.buildingSqft = where.buildingSqft || {};
+      where.buildingSqft[Op.lte] = maxSqft;
+    }
+
+    // Filter by amenities (interiorFeatures is stored as JSON array)
+    if (amenities && amenities.length > 0) {
+      const amenitiesConditions = amenities.map((amenity: string) => {
+        // Check if the JSON array contains the amenity (case-insensitive)
+        return Sequelize.literal(`EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text("interiorFeatures"::jsonb) AS element
+          WHERE LOWER(element) = LOWER('${amenity.replace(/'/g, "''")}')
+        )`);
+      });
+      // All amenities must be present (AND condition)
+      andConditions.push({
+        [Op.and]: amenitiesConditions,
+      });
+    }
+
     // Apply all AND conditions
     if (andConditions.length > 0) {
-      where[Op.and] = andConditions;
+      // If where already has Op.and, merge them; otherwise create new
+      if (where[Op.and]) {
+        where[Op.and] = [...(Array.isArray(where[Op.and]) ? where[Op.and] : [where[Op.and]]), ...andConditions];
+      } else {
+        where[Op.and] = andConditions;
+      }
     }
 
     const { count, rows } = await this.propertyModel.findAndCountAll({

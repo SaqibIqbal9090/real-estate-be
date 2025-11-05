@@ -129,11 +129,8 @@ export class AuthService {
     // Find user by email
     const user = await this.usersService.findByEmail(email);
     if (!user) {
-      // For security reasons, we don't reveal if the email exists or not
-      this.logger.debug(`User not found for email: ${email}, but returning success message`);
-      return {
-        message: 'If an account with that email exists, a password reset link has been sent.',
-      };
+      
+      throw new NotFoundException('User not found');
     }
 
     // Generate reset token

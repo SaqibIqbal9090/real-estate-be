@@ -44,6 +44,8 @@ export class CreatePropertyDto {
 
   alsoForLease?: boolean;
 
+  townhouseCondo?: string;
+
   priceAtLotValue?: number;
 
   // Address Information
@@ -56,6 +58,8 @@ export class CreatePropertyDto {
   streetType?: string;
 
   unitNo?: string;
+
+  unitLevel?: string;
 
   city: string;
 
@@ -98,6 +102,8 @@ export class CreatePropertyDto {
   marketArea?: string;
 
   etjCity?: string;
+
+  directions?: string;
 
   // School Information
   elementrySchool?: string;
@@ -446,6 +452,12 @@ export class CreatePropertyDto {
   poolArea?: string;
 
   poolPrivate?: string;
+
+  remarks?: string;
+
+  agentRemarks?: string;
+
+  mlsNumber?: string;
 
   // User relationship
   userId: string;

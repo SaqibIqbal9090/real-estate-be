@@ -62,6 +62,12 @@ export class Property extends Model<Property> {
   alsoForLease: boolean;
 
   @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  townhouseCondo: string;
+
+  @Column({
     type: DataType.DECIMAL(15, 2),
     defaultValue: 0,
   })
@@ -97,6 +103,12 @@ export class Property extends Model<Property> {
     allowNull: true,
   })
   unitNo: string;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  unitLevel: string;
 
   @Column({
     type: DataType.STRING,
@@ -219,6 +231,12 @@ export class Property extends Model<Property> {
     allowNull: true,
   })
   etjCity: string;
+
+  @Column({
+    type: DataType.TEXT,
+    allowNull: true,
+  })
+  directions: string;
 
   // School Information
   @Column({
@@ -1156,6 +1174,24 @@ export class Property extends Model<Property> {
     allowNull: true,
   })
   poolPrivate: string;
+
+  @Column({
+    type: DataType.TEXT,
+    allowNull: true,
+  })
+  remarks: string;
+
+  @Column({
+    type: DataType.TEXT,
+    allowNull: true,
+  })
+  agentRemarks: string;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  mlsNumber: string;
 
   // Relationships
   @ForeignKey(() => User)
