@@ -12,20 +12,63 @@ export class EmailService {
   }
 
   private initializeTransporter() {
-    // For development, you can use a test email service like Ethereal
-    // In production, configure with your actual SMTP settings
-    this.transporter = nodemailer.createTransport({
-      host: this.configService.get<string>('SMTP_HOST') || 'smtp.ethereal.email',
-      port: this.configService.get<number>('SMTP_PORT') || 587,
-      secure: false,
+    const host = this.configService.get<string>('SMTP_HOST');
+    const port = this.configService.get<number>('SMTP_PORT') || 587;
+    const user = this.configService.get<string>('SMTP_USER');
+    const pass = this.configService.get<string>('SMTP_PASS');
+    const secure = this.configService.get<string>('SMTP_SECURE') === 'true' || port === 465;
+
+    // Check if SMTP is configured
+    if (!host || !user || !pass) {
+      this.logger.warn('SMTP configuration missing. Using default test configuration. Emails may be delayed.');
+    }
+
+    // Configure transporter with connection pooling and timeout settings
+    const transportOptions: any = {
+      host: host || 'smtp.ethereal.email',
+      port: port,
+      secure: secure, // true for 465, false for other ports
       auth: {
-        user: this.configService.get<string>('SMTP_USER') || 'test@ethereal.email',
-        pass: this.configService.get<string>('SMTP_PASS') || 'test-password',
+        user: user || 'test@ethereal.email',
+        pass: pass || 'test-password',
       },
-    });
+      // Connection pool settings for better performance
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 100,
+      rateDelta: 1000,
+      rateLimit: 14, // Limit to 14 messages per second
+      // Timeout settings
+      connectionTimeout: 10000, // 10 seconds
+      greetingTimeout: 5000, // 5 seconds
+      socketTimeout: 10000, // 10 seconds
+    };
+
+    // Debug (only in development)
+    if (this.configService.get<string>('NODE_ENV') === 'development') {
+      transportOptions.debug = true;
+      transportOptions.logger = true;
+    }
+
+    this.transporter = nodemailer.createTransport(transportOptions);
+
+    // Verify connection
+    this.verifyConnection();
+  }
+
+  private async verifyConnection() {
+    try {
+      await this.transporter.verify();
+      this.logger.log('SMTP connection verified successfully');
+    } catch (error) {
+      this.logger.error('SMTP connection verification failed:', error.message);
+      this.logger.warn('Email sending may be delayed or fail. Please check your SMTP configuration.');
+    }
   }
 
   async sendPasswordResetEmail(email: string, resetToken: string): Promise<void> {
+    const startTime = Date.now();
+    
     try {
       const resetUrl = `${this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000'}/auth/reset-password?token=${resetToken}`;
       
@@ -52,18 +95,34 @@ export class EmailService {
             <p style="color: #666; font-size: 12px;">This is an automated message. Please do not reply to this email.</p>
           </div>
         `,
+        // Add priority for faster delivery
+        priority: 'high' as const,
+        // Message-ID for tracking
+        messageId: `<${Date.now()}-${Math.random().toString(36).substring(7)}@realestate.com>`,
       };
 
-      const info = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Password reset email sent to ${email}. Message ID: ${info.messageId}`);
+      // Send email with timeout
+      const sendPromise = this.transporter.sendMail(mailOptions);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email send timeout after 30 seconds')), 30000)
+      );
+
+      const info = await Promise.race([sendPromise, timeoutPromise]) as nodemailer.SentMessageInfo;
+      const duration = Date.now() - startTime;
+      
+      this.logger.log(`Password reset email sent to ${email} in ${duration}ms. Message ID: ${info.messageId}`);
       
       // Log the preview URL for development (Ethereal Email)
       if (info.previewUrl) {
-        this.logger.log(`Preview URL: ${info.previewUrl}`);
+        this.logger.warn(`Preview URL (Ethereal Email - for testing only): ${info.previewUrl}`);
+        this.logger.warn('⚠️  Using Ethereal Email test service. For production, configure real SMTP settings.');
       }
     } catch (error) {
-      this.logger.error(`Failed to send password reset email to ${email}:`, error.message);
-      throw new Error('Failed to send password reset email');
+      const duration = Date.now() - startTime;
+      this.logger.error(`Failed to send password reset email to ${email} after ${duration}ms:`, error.message);
+      
+      // Re-throw with more context
+      throw new Error(`Failed to send password reset email: ${error.message}`);
     }
   }
 }
