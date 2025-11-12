@@ -25,7 +25,7 @@ export class EmailService {
 
     // Configure transporter with connection pooling and timeout settings
     const transportOptions: any = {
-      host: host || 'smtp.ethereal.email',
+      host: host || 'smtp.gmail.com',
       port: port,
       secure: secure, // true for 465, false for other ports
       auth: {

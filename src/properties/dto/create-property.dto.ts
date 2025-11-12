@@ -1,9 +1,11 @@
 // Backend validations removed per requirements. Keep a loose DTO shape only.
 
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
 /**
  * CreatePropertyDto - Comprehensive property creation data transfer object
  * 
- * REQUIRED FIELDS:
+ * REQUIRED FIELDS (for published status):
  * - listType: Type of listing (sale, lease, both)
  * - listPrice: Listing price of the property
  * - streetNo: Street number
@@ -31,46 +33,93 @@
  */
 export class CreatePropertyDto {
   // Property Status
+  @ApiPropertyOptional({
+    description: 'Property status. Defaults to "draft" if not provided. Use "published" to create a complete listing (requires all required fields).',
+    enum: ['draft', 'published'],
+    example: 'draft',
+  })
   status?: 'draft' | 'published';
 
   // Listing Information
+  @ApiProperty({
+    description: 'Type of listing',
+    example: 'sale',
+    enum: ['sale', 'lease', 'both'],
+  })
   listType: string;
 
+  @ApiProperty({
+    description: 'Listing price of the property',
+    example: 450000,
+    type: 'number',
+  })
   listPrice: number;
 
+  @ApiPropertyOptional({ description: 'Listing date', example: '2024-01-15' })
   listDate?: string;
 
+  @ApiPropertyOptional({ description: 'Expiration date', example: '2024-12-31' })
   ExpDate?: string;
 
+  @ApiPropertyOptional({ description: 'Also available for lease', example: false, type: 'boolean' })
   alsoForLease?: boolean;
 
+  @ApiPropertyOptional({ description: 'Townhouse or Condo', example: 'Condo' })
   townhouseCondo?: string;
 
+  @ApiPropertyOptional({ description: 'Price at lot value', example: 100000, type: 'number' })
   priceAtLotValue?: number;
 
   // Address Information
+  @ApiProperty({
+    description: 'Street number',
+    example: '123',
+  })
   streetNo: string;
 
+  @ApiPropertyOptional({ description: 'Street direction (N, S, E, W, NE, etc.)', example: 'N' })
   stDirection?: string;
 
+  @ApiProperty({
+    description: 'Street name',
+    example: 'Main',
+  })
   streetName: string;
 
+  @ApiPropertyOptional({ description: 'Street type (St, Ave, Blvd, etc.)', example: 'St' })
   streetType?: string;
 
+  @ApiPropertyOptional({ description: 'Unit number', example: 'Apt 4B' })
   unitNo?: string;
 
+  @ApiPropertyOptional({ description: 'Unit level', example: '2nd Floor' })
   unitLevel?: string;
 
+  @ApiProperty({
+    description: 'City where property is located',
+    example: 'Austin',
+  })
   city: string;
 
+  @ApiProperty({
+    description: 'State where property is located (2-letter code)',
+    example: 'TX',
+  })
   state: string;
 
+  @ApiProperty({
+    description: 'ZIP code',
+    example: '78701',
+  })
   zipCode: string;
 
+  @ApiPropertyOptional({ description: 'ZIP code extension', example: '1234' })
   zipCodeExt?: string;
 
+  @ApiPropertyOptional({ description: 'County name', example: 'Travis' })
   county?: string;
 
+  @ApiPropertyOptional({ description: 'Subdivision name', example: 'Riverside Estates' })
   subDivision?: string;
 
   section?: string;
@@ -109,10 +158,13 @@ export class CreatePropertyDto {
   elementrySchool?: string;
 
   // Additional School Field (frontend sends this)
+  @ApiPropertyOptional({ description: 'Elementary school name', example: 'Riverside Elementary' })
   elementarySchool?: string;
 
+  @ApiPropertyOptional({ description: 'Middle school name', example: 'Riverside Middle School' })
   middleSchool?: string;
 
+  @ApiPropertyOptional({ description: 'High school name', example: 'Riverside High School' })
   highSchool?: string;
 
   secondMiddleSchool?: string;
@@ -122,10 +174,12 @@ export class CreatePropertyDto {
   publicImprovementDistrict?: string;
 
   // Building Information
+  @ApiPropertyOptional({ description: 'Building square footage', example: 2500, type: 'number' })
   buildingSqft?: number;
 
   sqftSourceDirection?: string;
 
+  @ApiPropertyOptional({ description: 'Year the property was built', example: '2010' })
   yearBuilt?: string;
 
   yearBuiltSource?: string;
@@ -168,6 +222,7 @@ export class CreatePropertyDto {
   guestHouseSqftSource?: string;
 
   // Lot Information
+  @ApiPropertyOptional({ description: 'Lot size in square feet', example: 10000, type: 'number' })
   lotSize?: number;
 
   lotSizeSource?: string;
@@ -194,6 +249,12 @@ export class CreatePropertyDto {
 
   restrictions?: string[];
 
+  @ApiPropertyOptional({ 
+    description: 'Property type(s) - array of property types',
+    example: ['Single Family', 'Residential'],
+    type: [String],
+    isArray: true,
+  })
   propertyType?: string[];
 
   style?: string[];
@@ -213,6 +274,12 @@ export class CreatePropertyDto {
 
   privatePoolDescription?: string[];
 
+  @ApiPropertyOptional({ 
+    description: 'Interior features - array of features',
+    example: ['crown-molding', 'hardwood-floors', 'granite-countertops'],
+    type: [String],
+    isArray: true,
+  })
   interiorFeatures?: string[];
 
   flooring?: string[];
@@ -258,12 +325,16 @@ export class CreatePropertyDto {
   counterTops?: string;
 
   // Bedrooms and Bathrooms
+  @ApiPropertyOptional({ description: 'Number of bedrooms', example: 3, type: 'number' })
   bedrooms?: number;
 
+  @ApiPropertyOptional({ description: 'Maximum number of bedrooms', example: 4, type: 'number' })
   bedroomsMax?: number;
 
+  @ApiPropertyOptional({ description: 'Number of full bathrooms', example: 2, type: 'number' })
   bathsFull?: number;
 
+  @ApiPropertyOptional({ description: 'Number of half bathrooms', example: 1, type: 'number' })
   bathshalf?: number;
 
   bedrommDescription?: string[];
@@ -282,6 +353,20 @@ export class CreatePropertyDto {
   }>;
 
   // Additional Rooms Field (frontend sends this)
+  @ApiPropertyOptional({
+    description: 'Room details - array of room objects',
+    example: [
+      {
+        id: 'room-1',
+        roomType: 'Living Room',
+        roomLocation: 'Main Floor',
+        roomDimension: '20x15',
+        features: ['fireplace', 'hardwood-floors']
+      }
+    ],
+    type: 'array',
+    isArray: true,
+  })
   rooms?: Array<{
     id: string;
     roomType: string;
@@ -445,6 +530,12 @@ export class CreatePropertyDto {
   // Additional Virtual Tour Fields (frontend sends these)
   virtualTourLink2?: string;
 
+  @ApiPropertyOptional({
+    description: 'Property images - array of image objects',
+    example: [{ image_url: 'https://example.com/image1.jpg' }],
+    type: 'array',
+    isArray: true,
+  })
   images?: Array<{ image_url: string }>;
 
   golfCourseName?: string;
@@ -459,6 +550,24 @@ export class CreatePropertyDto {
 
   mlsNumber?: string;
 
-  // User relationship
-  userId: string;
+  // User relationship (automatically set from JWT token, not required in request)
+  @ApiPropertyOptional({
+    description: 'User ID (automatically set from authenticated user, do not include in request)',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    readOnly: true,
+  })
+  userId?: string;
+
+  // Note: This DTO contains 200+ additional optional fields not shown here for brevity.
+  // All fields from the CreatePropertyDto class are accepted in the request body.
+  // Swagger will display all fields when @ApiPropertyOptional is used, but only key fields
+  // are explicitly documented above. Other fields include:
+  // - Tax information (taxId, keyMap, censusTract, etc.)
+  // - School information (elementarySchool, middleSchool, highSchool, etc.)
+  // - Lot information (lotSize, acres, lotDimensions, etc.)
+  // - HOA information (mandatoryHOA, maintenanceFee, etc.)
+  // - Financial details (taxYear, taxes, exemptions, etc.)
+  // - Agent information (listAgent, teamId, etc.)
+  // - Media links (videoTourLink, virtualTourLink, images, etc.)
+  // And many more - see the full DTO class definition for complete field list.
 } 

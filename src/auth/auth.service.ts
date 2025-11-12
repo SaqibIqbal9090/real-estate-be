@@ -127,10 +127,9 @@ export class AuthService {
     this.logger.debug(`Forgot password request for email: ${email}`);
 
     // Find user by email
-    const user = await this.usersService.findByEmail(email);
-    if (!user) {
-      
-      throw new NotFoundException('User not found');
+    const existingUser = await this.usersService.findByEmail(email);
+    if (!existingUser) {
+      throw new ConflictException('User with this email does not exist');
     }
 
     // Generate reset token
@@ -139,12 +138,12 @@ export class AuthService {
     resetExpires.setHours(resetExpires.getHours() + 1); // Token expires in 1 hour
 
     // Save token and expiry to user
-    await user.update({
+    await existingUser.update({
       passwordResetToken: resetToken,
       passwordResetExpires: resetExpires,
     });
 
-    this.logger.debug(`Password reset token generated for user: ${user.id}`);
+    this.logger.debug(`Password reset token generated for user: ${existingUser.id}`);
 
     // Send password reset email
     try {
@@ -153,7 +152,7 @@ export class AuthService {
     } catch (error) {
       this.logger.error(`Failed to send password reset email to ${email}:`, error.message);
       // Clear the token if email sending failed
-      await user.update({
+      await existingUser.update({
         passwordResetToken: null,
         passwordResetExpires: null,
       });
