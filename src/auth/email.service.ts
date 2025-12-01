@@ -381,5 +381,136 @@ export class EmailService {
       throw new Error(`Failed to send contact form email: ${error.message}`);
     }
   }
+
+  async sendSellRequestNotificationToAdmin(
+    sellRequestData: {
+      id: string;
+      homeAddress: string;
+      sellTimeline: string;
+      estimatedPrice: string;
+      propertyType: string;
+      fullName: string;
+      email: string;
+      phoneNumber: string;
+      createdAt: Date;
+    },
+    userData: {
+      fullName: string;
+      email: string;
+    },
+  ): Promise<void> {
+    const startTime = Date.now();
+    
+    try {
+      const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || this.configService.get<string>('SMTP_USER') || 'realestatemarketplaceintl@gmail.com';
+      
+      if (!adminEmail || adminEmail.trim() === '') {
+        this.logger.warn('No admin email configured. Skipping email notification.');
+        return;
+      }
+      
+      // Format the sell request data for email
+      const formatValue = (value: any): string => {
+        if (value === null || value === undefined || value === '') {
+          return 'Not specified';
+        }
+        if (value instanceof Date) {
+          return value.toLocaleString();
+        }
+        return String(value);
+      };
+
+      const mailOptions = {
+        from: this.configService.get<string>('FROM_EMAIL') || 'noreply@realestate.com',
+        to: adminEmail,
+        subject: `New Sell Request from ${userData.fullName} - Real Estate Marketplace`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px;">
+              New Sell Request Received
+            </h2>
+            
+            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <h3 style="color: #007bff; margin-top: 0;">User Information</h3>
+              <p><strong>Name:</strong> ${userData.fullName}</p>
+              <p><strong>Email:</strong> ${userData.email}</p>
+            </div>
+
+            <div style="background-color: #ffffff; padding: 15px; border: 1px solid #dee2e6; border-radius: 5px; margin: 20px 0;">
+              <h3 style="color: #007bff; margin-top: 0;">Sell Request Details</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Request ID:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${sellRequestData.id}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Home Address:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatValue(sellRequestData.homeAddress)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Sell Timeline:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatValue(sellRequestData.sellTimeline)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Estimated Price:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatValue(sellRequestData.estimatedPrice)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Property Type:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatValue(sellRequestData.propertyType)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Full Name:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatValue(sellRequestData.fullName)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Email:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><a href="mailto:${sellRequestData.email}">${sellRequestData.email}</a></td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Phone Number:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><a href="tel:${sellRequestData.phoneNumber}">${sellRequestData.phoneNumber}</a></td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px;"><strong>Request Date:</strong></td>
+                  <td style="padding: 8px;">${formatValue(sellRequestData.createdAt)}</td>
+                </tr>
+              </table>
+            </div>
+
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; color: #666; font-size: 12px;">
+              <p>This is an automated notification from the Real Estate Marketplace system.</p>
+              <p>Please contact the user at <a href="mailto:${userData.email}">${userData.email}</a> to follow up on this sell request.</p>
+            </div>
+          </div>
+        `,
+        priority: 'high' as const,
+        messageId: `<sell-request-${Date.now()}-${Math.random().toString(36).substring(7)}@realestate.com>`,
+      };
+
+      // Send email with timeout
+      const sendPromise = this.transporter.sendMail(mailOptions);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email send timeout after 30 seconds')), 30000)
+      );
+
+      const info = await Promise.race([sendPromise, timeoutPromise]) as nodemailer.SentMessageInfo;
+      const duration = Date.now() - startTime;
+      
+      this.logger.log(`Sell request notification email sent to admin (${adminEmail}) in ${duration}ms. Message ID: ${info.messageId}`);
+      
+      // Log the preview URL for development (Ethereal Email)
+      if (info.previewUrl) {
+        this.logger.warn(`Preview URL (Ethereal Email - for testing only): ${info.previewUrl}`);
+      }
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error(`Failed to send sell request notification email to admin after ${duration}ms:`, error.message);
+      
+      // Don't throw error - we don't want email failures to break the sell request creation
+      // Just log the error
+      this.logger.warn('Sell request was created successfully, but admin notification email failed.');
+    }
+  }
 }
 
