@@ -59,11 +59,11 @@ interface HarListing {
   [key: string]: any;
 }
 
-interface HarApiResponse {
-  success: boolean;
-  status: number;
-  bundle: HarListing[];
-  total: number;
+interface ODataResponse {
+  value: HarListing[];
+  '@odata.nextLink'?: string;
+  '@odata.context': string;
+  '@odata.count'?: number;
 }
 
 class HarImporter {
@@ -77,10 +77,15 @@ class HarImporter {
     this.harApiUrl = process.env.HAR_API_URL || '';
     this.userId = process.env.HAR_IMPORT_USER_ID || '';
 
-    // Require an access_token on HAR_API_URL (simple option only)
+    // Require an access_token on HAR_API_URL (OData endpoint)
     const urlHasAccessToken = this.harApiUrl.includes('access_token=');
     if (!urlHasAccessToken) {
-      throw new Error('HAR_API_URL must include an access_token query parameter (full URL from HAR).');
+      throw new Error('HAR_API_URL must include an access_token query parameter (full OData URL from HAR).');
+    }
+
+    // Ensure we're using the OData endpoint
+    if (!this.harApiUrl.includes('/OData/')) {
+      throw new Error('HAR_API_URL must be an OData endpoint (e.g., https://api.bridgedataoutput.com/api/v2/OData/har/Property?access_token=...)');
     }
 
     if (!this.userId) {
@@ -314,14 +319,29 @@ class HarImporter {
   }
 
   /**
-   * Fetches listings from HAR API with pagination
+   * Fetches listings from HAR OData API with pagination
    */
-  private async fetchHarListings(offset: number = 0, limit: number = 100): Promise<HarApiResponse> {
+  private async fetchHarListings(nextLink?: string, top: number = 100): Promise<ODataResponse> {
     try {
+      let url: string;
       
-      const url = `${this.harApiUrl}&q=City:eq=Houston;PropertyType:eq=Residential&limit=${limit}&offset=${offset}`;
+      if (nextLink) {
+        // Use the nextLink for pagination (it already includes access_token and filter)
+        url = nextLink;
+      } else {
+        // Build initial OData query URL
+        const urlObj = new URL(this.harApiUrl);
+        const accessToken = urlObj.searchParams.get('access_token') || '';
+        
+        // Get base URL without query params
+        const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
+        
+        // Build OData filter query
+        const filter = encodeURIComponent("(City eq 'Houston') and (PropertyType eq 'Residential')");
+        url = `${baseUrl}?access_token=${accessToken}&$filter=${filter}&$top=${top}`;
+      }
 
-      const response = await axios.get<HarApiResponse>(url, {
+      const response = await axios.get<ODataResponse>(url, {
         headers: {
           'Content-Type': 'application/json',
         },
@@ -336,9 +356,9 @@ class HarImporter {
     }
   }
 
-  private validateResponse(data: any): HarApiResponse {
-    if (!data.success) {
-      throw new Error(`HAR API returned error: ${data.status || 'Unknown error'}`);
+  private validateResponse(data: any): ODataResponse {
+    if (!data.value || !Array.isArray(data.value)) {
+      throw new Error(`HAR OData API returned invalid response: missing value array`);
     }
     return data;
   }
@@ -379,7 +399,7 @@ class HarImporter {
   }
 
   /**
-   * Imports listings in batches
+   * Imports listings in batches using OData pagination
    */
   async importListings(maxListings?: number): Promise<void> {
     try {
@@ -393,37 +413,47 @@ class HarImporter {
       }
       console.log(`✅ Using user: ${user.email || this.userId}`);
 
-      let offset = 0;
-      const limit = this.batchSize;
+      let nextLink: string | undefined = undefined;
+      const top = this.batchSize;
       let totalImported = 0;
       let totalSkipped = 0;
       let totalErrors = 0;
+      let batchNumber = 0;
 
-      console.log('\n🚀 Starting HAR import...\n');
+      console.log('\n🚀 Starting HAR import using OData API...\n');
 
       while (true) {
-        console.log(`📥 Fetching batch: offset=${offset}, limit=${limit}`);
+        batchNumber++;
+        console.log(`📥 Fetching batch #${batchNumber}${nextLink ? ' (using nextLink)' : ''}`);
         
-        const response = await this.fetchHarListings(offset, limit);
+        const response = await this.fetchHarListings(nextLink, top);
         
-        if (!response.bundle || response.bundle.length === 0) {
+        if (!response.value || response.value.length === 0) {
           console.log('\n✅ No more listings to import');
           break;
         }
 
-        console.log(`📦 Processing ${response.bundle.length} listings...\n`);
+        console.log(`📦 Processing ${response.value.length} listings...`);
+        if (response['@odata.count']) {
+          console.log(`📊 Total available: ${response['@odata.count']} listings`);
+        }
 
-        for (const listing of response.bundle) {
+        for (const listing of response.value) {
           if (maxListings && totalImported >= maxListings) {
             console.log(`\n⏹️  Reached max listings limit: ${maxListings}`);
             break;
           }
 
-          const imported = await this.importListing(listing);
-          if (imported) {
-            totalImported++;
-          } else {
-            totalSkipped++;
+          try {
+            const imported = await this.importListing(listing);
+            if (imported) {
+              totalImported++;
+            } else {
+              totalSkipped++;
+            }
+          } catch (error: any) {
+            totalErrors++;
+            console.error(`  ❌ Error processing listing: ${error.message}`);
           }
         }
 
@@ -432,18 +462,16 @@ class HarImporter {
           break;
         }
 
-        if (response.bundle.length < limit) {
+        // Check for next page
+        nextLink = response['@odata.nextLink'];
+        if (!nextLink) {
           console.log('\n✅ Reached end of listings');
           break;
         }
-
-        offset += limit;
         
         // Delay between batches to avoid rate limiting
-        if (offset < response.total) {
-          console.log(`\n⏳ Waiting ${this.delayBetweenBatches}ms before next batch...\n`);
-          await new Promise(resolve => setTimeout(resolve, this.delayBetweenBatches));
-        }
+        console.log(`\n⏳ Waiting ${this.delayBetweenBatches}ms before next batch...\n`);
+        await new Promise(resolve => setTimeout(resolve, this.delayBetweenBatches));
       }
 
       console.log('\n📊 Import Summary:');
