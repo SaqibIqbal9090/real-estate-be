@@ -83,3 +83,7 @@ export class SellRequest extends Model<SellRequest> {
   declare updatedAt: Date;
 }
 
+
+
+
+
