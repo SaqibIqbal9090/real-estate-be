@@ -72,8 +72,9 @@ class HarImporter {
   private userId: string;
   private batchSize: number = 100;
   private delayBetweenBatches: number = 1000; // 1 second
+  private isExternalSequelize: boolean = false;
 
-  constructor() {
+  constructor(sequelize?: Sequelize) {
     this.harApiUrl = process.env.HAR_API_URL || '';
     this.userId = process.env.HAR_IMPORT_USER_ID || '';
 
@@ -92,20 +93,25 @@ class HarImporter {
       throw new Error('HAR_IMPORT_USER_ID environment variable is required (UUID of a user in the database)');
     }
 
-    // Initialize Sequelize using environment variables (same defaults as app)
-    const dbName = process.env.DB_NAME || 'real_estate';
-    const dbUser = process.env.DB_USERNAME || 'postgres';
-    const dbPass = process.env.DB_PASSWORD || 'admin';
-    const dbHost = process.env.DB_HOST || 'localhost';
-    const dbPort = parseInt(process.env.DB_PORT ?? '5432', 10);
+    if (sequelize) {
+      this.sequelize = sequelize;
+      this.isExternalSequelize = true;
+    } else {
+      // Initialize Sequelize using environment variables (same defaults as app)
+      const dbName = process.env.DB_NAME || 'real_estate';
+      const dbUser = process.env.DB_USERNAME || 'postgres';
+      const dbPass = process.env.DB_PASSWORD || 'admin';
+      const dbHost = process.env.DB_HOST || 'localhost';
+      const dbPort = parseInt(process.env.DB_PORT ?? '5432', 10);
 
-    this.sequelize = new Sequelize(dbName, dbUser, dbPass, {
-      host: dbHost,
-      port: dbPort,
-      dialect: 'postgres',
-      logging: process.env.NODE_ENV === 'development',
-      models: [Property, User],
-    });
+      this.sequelize = new Sequelize(dbName, dbUser, dbPass, {
+        host: dbHost,
+        port: dbPort,
+        dialect: 'postgres',
+        logging: process.env.NODE_ENV === 'development',
+        models: [Property, User],
+      });
+    }
   }
 
   /**
@@ -115,13 +121,13 @@ class HarImporter {
     const property: Partial<Property> = {
       userId: this.userId,
       status: 'published',
-      
+
       // Listing Information
       listType: this.determineListType(harListing),
       listPrice: harListing.ListPrice || 0,
       listDate: harListing.ListingContractDate ? new Date(harListing.ListingContractDate) : new Date(),
       mlsNumber: harListing.ListingId || harListing.ListingKey,
-      
+
       // Address Information
       streetNo: harListing.StreetNumber || '0',
       stDirection: harListing.StreetDirPrefix || undefined,
@@ -134,17 +140,17 @@ class HarImporter {
       zipCodeExt: harListing.PostalCodePlus4 || undefined,
       county: harListing.CountyOrParish || undefined,
       subDivision: harListing.SubdivisionName || undefined,
-      
+
       // Location
       legalDescription: harListing.TaxLegalDescription || undefined,
       taxId: harListing.ParcelNumber || undefined,
       censusTract: harListing.HAR_CensusTract
         ? String(harListing.HAR_CensusTract)
         : undefined,
-      
+
       // Property Type
       propertyType: this.mapPropertyType(harListing),
-      
+
       // Building Information
       buildingSqft: harListing.LivingArea ?? undefined,
       sqftSource: harListing.LivingAreaSource || undefined,
@@ -153,7 +159,7 @@ class HarImporter {
       stories: harListing.StoriesTotal ? String(harListing.StoriesTotal) : undefined,
       newConstruction: harListing.NewConstructionYN || false,
       builderName: harListing.BuilderName || null,
-      
+
       // Lot Information
       lotSize: harListing.LotSizeSquareFeet
         ? Number(harListing.LotSizeSquareFeet)
@@ -161,36 +167,36 @@ class HarImporter {
       lotSizeSource: harListing.LotSizeSource || undefined,
       acres: harListing.LotSizeAcres ? String(harListing.LotSizeAcres) : undefined,
       lotDimenssions: harListing.LotSizeDimensions || undefined,
-      
+
       // Bedrooms and Bathrooms
       bedrooms: harListing.BedroomsTotal ?? undefined,
       bathsFull: harListing.BathroomsFull ?? undefined,
       bathshalf: harListing.BathroomsHalf ?? undefined,
-      
+
       // Garage Information
       garage: harListing.GarageSpaces ? String(harListing.GarageSpaces) : undefined,
       garageDimensions: harListing.HAR_GarageDimension || undefined,
       carport: harListing.CarportSpaces ? String(harListing.CarportSpaces) : undefined,
-      
+
       // School Information
       elementarySchool: harListing.ElementarySchool || undefined,
       middleSchool: harListing.MiddleOrJuniorSchool || undefined,
       highSchool: harListing.HighSchool || undefined,
       schoolDistrict: harListing.HighSchoolDistrict || undefined,
-      
+
       // Tax Information
       taxYear: harListing.TaxYear ? String(harListing.TaxYear) : undefined,
       taxes: harListing.TaxAnnualAmount ?? undefined,
       totalTaxRate: harListing.HAR_TaxRate || null,
       exemptions: harListing.TaxExemptions?.join(', ') || undefined,
-      
+
       // HOA Information
       mandatoryHOA: harListing.AssociationYN ? 'Yes' : 'No',
       maintenanceFee: harListing.AssociationFee ? 'Yes' : 'No',
       maintenanceFeeAmount: harListing.AssociationFee ?? undefined,
       maintenanceFeePaymentSched: harListing.AssociationFeeFrequency || undefined,
       maintenanceFeeIncludes: harListing.AssociationFeeIncludes || [],
-      
+
       // Features
       restrictions: harListing.HAR_Restrictions || [],
       waterfrontFeatures: harListing.WaterfrontFeatures || [],
@@ -204,47 +210,47 @@ class HarImporter {
       coolingSystemDescription: harListing.Cooling || [],
       waterSewerDescription: this.mapWaterSewer(harListing),
       streetSurface: harListing.RoadSurfaceType || [],
-      
+
       // Appliances (individual fields)
       microwave: harListing.Appliances?.includes('Microwave') ? 'Yes' : undefined,
       dishwasher: harListing.Appliances?.includes('Dishwasher') ? 'Yes' : undefined,
       disposal: harListing.Appliances?.includes('Disposal') ? 'Yes' : undefined,
-      
+
       // Fireplace
       fireplaceNo: harListing.FireplacesTotal
         ? String(harListing.FireplacesTotal)
         : undefined,
       fireplaceDescription: harListing.FireplaceFeatures || [],
-      
+
       // Kitchen
       kitchenDescription: harListing.RoomKitchenFeatures || [],
-      
+
       // Room Description
       roomDescription: harListing.RoomType || [],
-      
+
       // Disclosures
       disclosures: harListing.Disclosures || [],
       exclusions: harListing.Exclusions ? [harListing.Exclusions] : [],
-      
+
       // Listing Terms
       financingConsideration: harListing.ListingTerms || [],
-      
+
       // Remarks
       remarks: harListing.PublicRemarks || undefined,
       directions: harListing.Directions || undefined,
-      
+
       // Agent Information
       listAgent: harListing.ListAgentFullName || undefined,
       appointmentPhone: harListing.ListAgentPreferredPhone || undefined,
       agentAlternatePhone: harListing.HAR_PhoneAlt || null,
-      
+
       // Virtual Tours
       virtualTourLink1: harListing.VirtualTourURLUnbranded || null,
       virtualTourLink2: harListing.VirtualTourURLBranded || null,
-      
+
       // Images
       images: this.mapImages(harListing.Media || []),
-      
+
       // Additional Fields
       masterPlannedCommunity: harListing.HAR_MasterPlannedCommunityYN || false,
       masterPlannedCommunityName: harListing.HAR_MasterPlannedCommunity || null,
@@ -254,14 +260,14 @@ class HarImporter {
       poolArea: harListing.HAR_PoolArea ? 'Yes' : 'No',
       golfCourseName: harListing.HAR_GolfCourse || null,
       utilityDistrict: harListing.HAR_UtilityDistrict ? 'Yes' : 'No',
-      
+
       // Additional HAR-specific mappings
       priceAtLotValue: harListing.HAR_LotValue ? Number(harListing.HAR_LotValue) : 0,
       alsoForLease: harListing.LeaseConsideredYN || false,
-      
+
       // Style/Architecture (if field exists in model)
       style: harListing.ArchitecturalStyle || [],
-      
+
       // Green/Energy Features
       energyFeatures: harListing.GreenEnergyEfficient || [],
       greenEnergyCertifications: harListing.GreenBuildingVerificationType || [],
@@ -311,7 +317,7 @@ class HarImporter {
     if (!media || !Array.isArray(media)) {
       return [];
     }
-    
+
     return media
       .filter(m => m.MediaCategory === 'Photo' && m.MediaURL)
       .sort((a, b) => (a.Order || 0) - (b.Order || 0))
@@ -324,7 +330,7 @@ class HarImporter {
   private async fetchHarListings(nextLink?: string, top: number = 100): Promise<ODataResponse> {
     try {
       let url: string;
-      
+
       if (nextLink) {
         // Use the nextLink for pagination (it already includes access_token and filter)
         url = nextLink;
@@ -332,10 +338,10 @@ class HarImporter {
         // Build initial OData query URL
         const urlObj = new URL(this.harApiUrl);
         const accessToken = urlObj.searchParams.get('access_token') || '';
-        
+
         // Get base URL without query params
         const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
-        
+
         // Build OData filter query
         const filter = encodeURIComponent("(City eq 'Houston') and (PropertyType eq 'Residential')");
         url = `${baseUrl}?access_token=${accessToken}&$filter=${filter}&$top=${top}`;
@@ -425,9 +431,9 @@ class HarImporter {
       while (true) {
         batchNumber++;
         console.log(`📥 Fetching batch #${batchNumber}${nextLink ? ' (using nextLink)' : ''}`);
-        
+
         const response = await this.fetchHarListings(nextLink, top);
-        
+
         if (!response.value || response.value.length === 0) {
           console.log('\n✅ No more listings to import');
           break;
@@ -468,7 +474,7 @@ class HarImporter {
           console.log('\n✅ Reached end of listings');
           break;
         }
-        
+
         // Delay between batches to avoid rate limiting
         console.log(`\n⏳ Waiting ${this.delayBetweenBatches}ms before next batch...\n`);
         await new Promise(resolve => setTimeout(resolve, this.delayBetweenBatches));
@@ -484,7 +490,9 @@ class HarImporter {
       console.error('\n❌ Import failed:', error.message);
       throw error;
     } finally {
-      await this.sequelize.close();
+      if (!this.isExternalSequelize) {
+        await this.sequelize.close();
+      }
     }
   }
 }
@@ -492,7 +500,7 @@ class HarImporter {
 // Main execution
 async function main() {
   const maxListings = process.env.MAX_LISTINGS ? parseInt(process.env.MAX_LISTINGS) : undefined;
-  
+
   const importer = new HarImporter();
   await importer.importListings(maxListings);
 }
