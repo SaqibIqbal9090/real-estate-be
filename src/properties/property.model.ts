@@ -7,6 +7,7 @@ import {
   UpdatedAt,
   ForeignKey,
   BelongsTo,
+  Index,
 } from 'sequelize-typescript';
 import { User } from '../users/user.model';
 
@@ -501,7 +502,7 @@ export class Property extends Model<Property> {
     type: DataType.STRING,
     allowNull: true,
   })
-  
+
   subDivisionLakeAccess: string;
 
   @Column({
@@ -1187,6 +1188,7 @@ export class Property extends Model<Property> {
   })
   agentRemarks: string;
 
+  @Index
   @Column({
     type: DataType.STRING,
     allowNull: true,

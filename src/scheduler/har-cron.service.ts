@@ -1,30 +1,44 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Sequelize } from 'sequelize-typescript';
-import { HarImporter } from '../scripts/har-import';
+import { spawn } from 'child_process';
 
 @Injectable()
 export class HarCronService {
     private readonly logger = new Logger(HarCronService.name);
 
-    constructor(private readonly sequelize: Sequelize) { }
+    constructor() { }
 
     @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
-    async handleDailyImport() {
-        this.logger.log('Starting daily HAR import job...');
-        try {
-            // Create importer instance injecting the existing Sequelize connection
-            const importer = new HarImporter(this.sequelize);
+    handleDailyImport() {
+        this.logger.log('Starting daily HAR import job via child process...');
 
-            // Import 1000 records as requested
-            // The HarImporter might be using environment variables for other configs like batch size,
-            // but MAX_LISTINGS was passed in the main function of the script.
-            // HarImporter.importListings() accepts maxListings argument.
-            await importer.importListings(1000);
+        // Spawn a child process to run the import script
+        // MAX_LISTINGS=1000 npm run har:import
 
-            this.logger.log('Daily HAR import job completed successfully.');
-        } catch (error) {
-            this.logger.error('Failed the daily HAR import job', error);
-        }
+        const child = spawn('npm', ['run', 'har:import'], {
+            env: { ...process.env, MAX_LISTINGS: '1000' },
+            shell: true,
+            cwd: process.cwd(),
+        });
+
+        child.stdout.on('data', (data) => {
+            this.logger.log(`[HAR Import]: ${data.toString().trim()}`);
+        });
+
+        child.stderr.on('data', (data) => {
+            this.logger.error(`[HAR Import Error]: ${data.toString().trim()}`);
+        });
+
+        child.on('close', (code) => {
+            if (code === 0) {
+                this.logger.log(`Daily HAR import job completed successfully (exit code ${code}).`);
+            } else {
+                this.logger.error(`Daily HAR import job failed with exit code ${code}.`);
+            }
+        });
+
+        child.on('error', (err) => {
+            this.logger.error('Failed to start HAR import child process', err);
+        });
     }
 }
