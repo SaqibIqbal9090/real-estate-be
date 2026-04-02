@@ -378,7 +378,9 @@ class HarImporter {
         const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
 
         // Build OData filter query
-        const filter = encodeURIComponent("(City eq 'Houston') and (PropertyType eq 'Residential')");
+        // Default to all residential properties across all cities if no filter is provided
+        const filterStr = process.env.HAR_IMPORT_FILTER || "(PropertyType eq 'Residential')";
+        const filter = encodeURIComponent(filterStr);
         url = `${baseUrl}?access_token=${accessToken}&$filter=${filter}&$top=${top}`;
 
         if (skip > 0) {
