@@ -3,6 +3,8 @@ import { Sequelize } from 'sequelize-typescript';
 import { Property } from '../properties/property.model';
 import { User } from '../users/user.model';
 import * as dotenv from 'dotenv';
+import * as fs from 'fs';
+import * as path from 'path';
 
 dotenv.config();
 
@@ -73,6 +75,7 @@ class HarImporter {
   private batchSize: number = 100;
   private delayBetweenBatches: number = 1000; // 1 second
   private isExternalSequelize: boolean = false;
+  private statusFilePath = path.join(process.cwd(), 'har-import-status.json');
 
   constructor(sequelize?: Sequelize) {
     this.harApiUrl = process.env.HAR_API_URL || '';
@@ -325,9 +328,41 @@ class HarImporter {
   }
 
   /**
+   * Reads the last saved offset from the status file
+   */
+  private readStatus(): number {
+    try {
+      if (fs.existsSync(this.statusFilePath)) {
+        const data = fs.readFileSync(this.statusFilePath, 'utf8');
+        const status = JSON.parse(data);
+        return typeof status.lastOffset === 'number' ? status.lastOffset : 0;
+      }
+    } catch (error) {
+      console.warn('⚠️ Could not read status file, starting from 0:', error.message);
+    }
+    return 0;
+  }
+
+  /**
+   * Saves the current offset to the status file
+   */
+  private saveStatus(offset: number): void {
+    try {
+      const status = {
+        lastOffset: offset,
+        lastUpdatedAt: new Date().toISOString(),
+      };
+      fs.writeFileSync(this.statusFilePath, JSON.stringify(status, null, 2));
+      console.log(`💾 Saved checkpoint: offset ${offset}`);
+    } catch (error) {
+      console.error('❌ Failed to save status file:', error.message);
+    }
+  }
+
+  /**
    * Fetches listings from HAR OData API with pagination
    */
-  private async fetchHarListings(nextLink?: string, top: number = 100): Promise<ODataResponse> {
+  private async fetchHarListings(nextLink?: string, top: number = 100, skip: number = 0): Promise<ODataResponse> {
     try {
       let url: string;
 
@@ -345,6 +380,10 @@ class HarImporter {
         // Build OData filter query
         const filter = encodeURIComponent("(City eq 'Houston') and (PropertyType eq 'Residential')");
         url = `${baseUrl}?access_token=${accessToken}&$filter=${filter}&$top=${top}`;
+
+        if (skip > 0) {
+          url += `&$skip=${skip}`;
+        }
       }
 
       const response = await axios.get<ODataResponse>(url, {
@@ -419,23 +458,26 @@ class HarImporter {
       }
       console.log(`✅ Using user: ${user.email || this.userId}`);
 
+      const lastSavedOffset = this.readStatus();
       let nextLink: string | undefined = undefined;
       const top = this.batchSize;
       let totalImported = 0;
       let totalSkipped = 0;
       let totalErrors = 0;
       let batchNumber = 0;
+      let totalAdvanced = 0;
 
-      console.log('\n🚀 Starting HAR import using OData API...\n');
+      console.log(`\n🚀 Starting HAR import (Resuming from offset: ${lastSavedOffset})...\n`);
 
       while (true) {
         batchNumber++;
         console.log(`📥 Fetching batch #${batchNumber}${nextLink ? ' (using nextLink)' : ''}`);
 
-        const response = await this.fetchHarListings(nextLink, top);
+        const response = await this.fetchHarListings(nextLink, top, nextLink ? 0 : lastSavedOffset);
 
         if (!response.value || response.value.length === 0) {
           console.log('\n✅ No more listings to import');
+          this.saveStatus(0); // Reset offset when we reach the end
           break;
         }
 
@@ -444,9 +486,11 @@ class HarImporter {
           console.log(`📊 Total available: ${response['@odata.count']} listings`);
         }
 
+        let stopProcessingInThisBatch = false;
         for (const listing of response.value) {
           if (maxListings && totalImported >= maxListings) {
             console.log(`\n⏹️  Reached max listings limit: ${maxListings}`);
+            stopProcessingInThisBatch = true;
             break;
           }
 
@@ -461,10 +505,12 @@ class HarImporter {
             totalErrors++;
             console.error(`  ❌ Error processing listing: ${error.message}`);
           }
+          totalAdvanced++;
         }
 
         // Check if we've reached the end or max limit
-        if (maxListings && totalImported >= maxListings) {
+        if (stopProcessingInThisBatch || (maxListings && totalImported >= maxListings)) {
+          this.saveStatus(lastSavedOffset + totalAdvanced);
           break;
         }
 
@@ -472,6 +518,7 @@ class HarImporter {
         nextLink = response['@odata.nextLink'];
         if (!nextLink) {
           console.log('\n✅ Reached end of listings');
+          this.saveStatus(0); // Reset offset when we reach the end
           break;
         }
 
