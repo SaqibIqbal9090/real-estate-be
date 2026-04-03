@@ -24,7 +24,7 @@ export class HarCronService {
         // MAX_LISTINGS=200 npm run har:import
 
         const child = spawn('npm', ['run', 'har:import'], {
-            env: { ...process.env, MAX_LISTINGS: '200' },
+            env: { ...process.env, MAX_LISTINGS: '500' },
             shell: true,
             cwd: process.cwd(),
         });
