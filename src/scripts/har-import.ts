@@ -76,6 +76,7 @@ class HarImporter {
   private delayBetweenBatches: number = 1000; // 1 second
   private isExternalSequelize: boolean = false;
   private statusFilePath = path.join(process.cwd(), 'har-import-status.json');
+  private lastListingKey: string | null = null;
 
   constructor(sequelize?: Sequelize) {
     this.harApiUrl = process.env.HAR_API_URL || '';
@@ -328,32 +329,36 @@ class HarImporter {
   }
 
   /**
-   * Reads the last saved offset from the status file
+   * Reads the last saved status (offset and listing key) from the status file
    */
-  private readStatus(): number {
+  private readStatus(): { lastOffset: number; lastListingKey: string | null } {
     try {
       if (fs.existsSync(this.statusFilePath)) {
         const data = fs.readFileSync(this.statusFilePath, 'utf8');
         const status = JSON.parse(data);
-        return typeof status.lastOffset === 'number' ? status.lastOffset : 0;
+        return {
+          lastOffset: typeof status.lastOffset === 'number' ? status.lastOffset : 0,
+          lastListingKey: status.lastListingKey || null
+        };
       }
     } catch (error) {
       console.warn('⚠️ Could not read status file, starting from 0:', error.message);
     }
-    return 0;
+    return { lastOffset: 0, lastListingKey: null };
   }
 
   /**
-   * Saves the current offset to the status file
+   * Saves the current status to the status file
    */
-  private saveStatus(offset: number): void {
+  private saveStatus(offset: number, listingKey: string | null): void {
     try {
       const status = {
         lastOffset: offset,
+        lastListingKey: listingKey,
         lastUpdatedAt: new Date().toISOString(),
       };
       fs.writeFileSync(this.statusFilePath, JSON.stringify(status, null, 2));
-      console.log(`💾 Saved checkpoint: offset ${offset}`);
+      console.log(`💾 Saved checkpoint: offset ${offset}${listingKey ? `, lastKey ${listingKey}` : ''}`);
     } catch (error) {
       console.error('❌ Failed to save status file:', error.message);
     }
@@ -362,31 +367,46 @@ class HarImporter {
   /**
    * Fetches listings from HAR OData API with pagination
    */
-  private async fetchHarListings(nextLink?: string, top: number = 100, skip: number = 0): Promise<ODataResponse> {
+  private async fetchHarListings(nextLink?: string, top: number = 100, skip: number = 0, listingKey?: string): Promise<ODataResponse> {
     try {
       let url: string;
 
       if (nextLink) {
-        // Use the nextLink for pagination (it already includes access_token and filter)
         url = nextLink;
       } else {
-        // Build initial OData query URL
         const urlObj = new URL(this.harApiUrl);
         const accessToken = urlObj.searchParams.get('access_token') || '';
-
-        // Get base URL without query params
         const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
 
-        // Build OData filter query
-        // Default to all residential properties across all cities if no filter is provided
-        const filterStr = process.env.HAR_IMPORT_FILTER || "(PropertyType eq 'Residential')";
-        const filter = encodeURIComponent(filterStr);
-        url = `${baseUrl}?access_token=${accessToken}&$filter=${filter}&$top=${top}`;
+        // Build filter
+        let filterStr = process.env.HAR_IMPORT_FILTER || "(PropertyType eq 'Residential')";
 
-        if (skip > 0) {
-          url += `&$skip=${skip}`;
+        // Add key-based pagination if listingKey is provided
+        if (listingKey) {
+          // Wrap existing filter in parentheses and add the Key condition
+          if (filterStr.startsWith('(') && filterStr.endsWith(')')) {
+            filterStr = `${filterStr} and (ListingKey gt '${listingKey}')`;
+          } else {
+            filterStr = `(${filterStr}) and (ListingKey gt '${listingKey}')`;
+          }
+        }
+
+        const filter = encodeURIComponent(filterStr);
+
+        // Always use $orderby=ListingKey to ensure consistent pagination for key-based filtering
+        url = `${baseUrl}?access_token=${accessToken}&$filter=${filter}&$top=${top}&$orderby=ListingKey`;
+
+        // Only use $skip if we don't have a listingKey and it's within limits
+        if (!listingKey && skip > 0) {
+          if (skip > 10000) {
+            console.warn(`⚠️ Warning: skip value ${skip} exceeds 10000 limit. Fast-forwarding from 0 and skipping existing records locally.`);
+          } else {
+            url += `&$skip=${skip}`;
+          }
         }
       }
+
+      console.log(`🌐 API Request: ${url.split('access_token=')[0]}access_token=***${url.includes('$') ? '&' + url.split('&').slice(1).join('&') : ''}`);
 
       const response = await axios.get<ODataResponse>(url, {
         headers: {
@@ -460,26 +480,36 @@ class HarImporter {
       }
       console.log(`✅ Using user: ${user.email || this.userId}`);
 
-      const lastSavedOffset = this.readStatus();
+      const { lastOffset, lastListingKey } = this.readStatus();
       let nextLink: string | undefined = undefined;
       const top = this.batchSize;
       let totalImported = 0;
       let totalSkipped = 0;
       let totalErrors = 0;
       let batchNumber = 0;
-      let totalAdvanced = 0;
+      
+      // If we have an offset > 10000 but no key, we must start from 0 and fast-forward
+      const initialOffset = (lastOffset > 10000 && !lastListingKey) ? 0 : lastOffset;
+      let currentOffset = initialOffset;
+      let currentListingKey = lastListingKey;
 
-      console.log(`\n🚀 Starting HAR import (Resuming from offset: ${lastSavedOffset})...\n`);
+      console.log(`\n🚀 Starting HAR import (Resuming from offset: ${initialOffset}${lastListingKey ? `, key: ${lastListingKey}` : ''})...\n`);
 
       while (true) {
         batchNumber++;
         console.log(`📥 Fetching batch #${batchNumber}${nextLink ? ' (using nextLink)' : ''}`);
 
-        const response = await this.fetchHarListings(nextLink, top, nextLink ? 0 : lastSavedOffset);
+        // Try to fetch using listingKey if we have it, otherwise fallback to skip (if within limits)
+        const response = await this.fetchHarListings(
+          nextLink,
+          top,
+          nextLink ? 0 : (currentListingKey ? 0 : lastOffset),
+          nextLink ? undefined : currentListingKey
+        );
 
         if (!response.value || response.value.length === 0) {
           console.log('\n✅ No more listings to import');
-          this.saveStatus(0); // Reset offset when we reach the end
+          this.saveStatus(0, null); // Reset offset when we reach the end
           break;
         }
 
@@ -490,6 +520,8 @@ class HarImporter {
 
         let stopProcessingInThisBatch = false;
         for (const listing of response.value) {
+          currentListingKey = listing.ListingKey; // Update current key for checkpoint
+
           if (maxListings && totalImported >= maxListings) {
             console.log(`\n⏹️  Reached max listings limit: ${maxListings}`);
             stopProcessingInThisBatch = true;
@@ -507,12 +539,12 @@ class HarImporter {
             totalErrors++;
             console.error(`  ❌ Error processing listing: ${error.message}`);
           }
-          totalAdvanced++;
+          currentOffset++;
         }
 
         // Check if we've reached the end or max limit
         if (stopProcessingInThisBatch || (maxListings && totalImported >= maxListings)) {
-          this.saveStatus(lastSavedOffset + totalAdvanced);
+          this.saveStatus(currentOffset, currentListingKey);
           break;
         }
 
@@ -520,12 +552,13 @@ class HarImporter {
         nextLink = response['@odata.nextLink'];
         if (!nextLink) {
           console.log('\n✅ Reached end of listings');
-          this.saveStatus(0); // Reset offset when we reach the end
+          this.saveStatus(0, null); // Reset offset when we reach the end
           break;
         }
 
         // Delay between batches to avoid rate limiting
         console.log(`\n⏳ Waiting ${this.delayBetweenBatches}ms before next batch...\n`);
+        this.saveStatus(currentOffset, currentListingKey);
         await new Promise(resolve => setTimeout(resolve, this.delayBetweenBatches));
       }
 
