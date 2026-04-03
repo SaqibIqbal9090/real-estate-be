@@ -504,7 +504,7 @@ class HarImporter {
           nextLink,
           top,
           nextLink ? 0 : (currentListingKey ? 0 : lastOffset),
-          nextLink ? undefined : currentListingKey
+          nextLink ? undefined : (currentListingKey || undefined)
         );
 
         if (!response.value || response.value.length === 0) {
