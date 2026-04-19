@@ -126,6 +126,59 @@ export class EmailService {
     }
   }
 
+  async sendVerificationEmail(email: string, verificationToken: string): Promise<void> {
+    const startTime = Date.now();
+    
+    try {
+      const verificationUrl = `${this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000'}/auth/verify-email?token=${verificationToken}`;
+      
+      const mailOptions = {
+        from: this.configService.get<string>('FROM_EMAIL') || 'noreply@realestate.com',
+        to: email,
+        subject: 'Email Verification - Real Estate Marketplace App',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #333;">Welcome to Real Estate Marketplace!</h2>
+            <p>Hello,</p>
+            <p>Thank you for registering. Please click the button below to verify your email address:</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${verificationUrl}" 
+                 style="background-color: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                Verify Email
+              </a>
+            </div>
+            <p>Or copy and paste this link into your browser:</p>
+            <p style="word-break: break-all; color: #666;">${verificationUrl}</p>
+            <p>If you didn't create an account, please ignore this email.</p>
+            <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+            <p style="color: #666; font-size: 12px;">This is an automated message. Please do not reply to this email.</p>
+          </div>
+        `,
+        priority: 'high' as const,
+        messageId: `<verify-${Date.now()}-${Math.random().toString(36).substring(7)}@realestate.com>`,
+      };
+
+      // Send email with timeout
+      const sendPromise = this.transporter.sendMail(mailOptions);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email send timeout after 30 seconds')), 30000)
+      );
+
+      const info = await Promise.race([sendPromise, timeoutPromise]) as nodemailer.SentMessageInfo;
+      const duration = Date.now() - startTime;
+      
+      this.logger.log(`Verification email sent to ${email} in ${duration}ms. Message ID: ${info.messageId}`);
+      
+      if (info.previewUrl) {
+        this.logger.warn(`Preview URL (Ethereal Email): ${info.previewUrl}`);
+      }
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error(`Failed to send verification email to ${email} after ${duration}ms:`, error.message);
+      throw new Error(`Failed to send verification email: ${error.message}`);
+    }
+  }
+
   async sendBuyRequestNotificationToAdmin(
     buyRequestData: {
       id: string;
