@@ -7,6 +7,7 @@ import {
   UpdatedAt,
 } from 'sequelize-typescript';
 import * as bcrypt from 'bcryptjs';
+import { UserStatus } from './user-status.enum';
 
 @Table({
   tableName: 'users',
@@ -60,6 +61,26 @@ export class User extends Model<User> {
     allowNull: true,
   })
   declare passwordResetExpires: Date | null;
+
+  @Column({
+    type: DataType.ENUM(...Object.values(UserStatus)),
+    allowNull: false,
+    defaultValue: UserStatus.PENDING,
+  })
+  declare status: UserStatus;
+
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  declare verificationToken: string | null;
+
+  @Column({
+    type: DataType.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  })
+  declare isVerified: boolean;
 
   @CreatedAt
   declare createdAt: Date;

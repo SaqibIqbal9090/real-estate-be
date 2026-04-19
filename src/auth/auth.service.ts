@@ -10,6 +10,8 @@ import { EmailService } from './email.service';
 import { User } from '../users/user.model';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
+import { UserStatus } from '../users/user-status.enum';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 
 @Injectable()
 export class AuthService {
@@ -34,28 +36,38 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(password, 10);
     this.logger.debug(`Password hashed successfully. Hash length: ${hashedPassword.length}`);
     
-    // Create user with hashed password
+    // Generate verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    
+    // Create user with hashed password and verification token
     const user = await this.usersService.create({
       email,
       password: hashedPassword,
       fullName,
+      status: UserStatus.PENDING,
+      verificationToken,
+      isVerified: false,
     });
     
     this.logger.debug(`User created with ID: ${user.id}`);
-    this.logger.debug(`Stored password is hashed: ${user.password.startsWith('$2a$') || user.password.startsWith('$2b$')}`);
 
-    // Generate JWT token
-    const payload = { email: user.email, sub: user.id };
-    const token = this.jwtService.sign(payload);
+    // Send verification email
+    try {
+      await this.emailService.sendVerificationEmail(email, verificationToken);
+      this.logger.debug(`Verification email sent to: ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send verification email to ${email}:`, error.message);
+      // We don't throw here to allow user creation even if email fails, 
+      // but they won't be able to login until verified.
+    }
 
     return {
-      message: 'User registered successfully',
+      message: 'User registered successfully. Please check your email to verify your account.',
       user: {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
       },
-      token,
     };
   }
 
@@ -93,6 +105,12 @@ export class AuthService {
     } catch (error) {
       this.logger.error(`bcrypt error for user ${user.id}:`, error.message);
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Check if user is verified
+    if (user.status !== UserStatus.VERIFIED) {
+      this.logger.debug(`Unverified login attempt for user: ${user.id}, status: ${user.status}`);
+      throw new UnauthorizedException('Please verify your email address before logging in.');
     }
 
     this.logger.debug(`Login successful for user: ${user.id}`);
@@ -250,4 +268,85 @@ export class AuthService {
       message: 'Password has been reset successfully.',
     };
   }
-} 
+
+  async verifyEmail(token: string): Promise<{ message: string }> {
+    this.logger.debug(`Email verification request for token: ${token.substring(0, 8)}...`);
+
+    // Find user by verification token
+    const user = await User.findOne({
+      where: {
+        verificationToken: token,
+      },
+    });
+
+    if (!user) {
+      this.logger.debug(`No user found with verification token: ${token.substring(0, 8)}...`);
+      throw new BadRequestException('Invalid or expired verification token.');
+    }
+
+    // Update user status and clear verification token
+    await user.update({
+      status: UserStatus.VERIFIED,
+      isVerified: true,
+      verificationToken: null,
+    });
+
+    this.logger.debug(`Email verified successfully for user: ${user.id}`);
+
+    return {
+      message: 'Email verified successfully. You can now log in.',
+    };
+  }
+
+  async resendVerificationEmail(resendVerificationDto: ResendVerificationDto): Promise<{ message: string }> {
+    const { email } = resendVerificationDto;
+    this.logger.debug(`Resend verification email request for: ${email}`);
+
+    // Find user by email
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      // Return success even if user not found to prevent email enumeration
+      this.logger.debug(`User not found for resend verification: ${email}`);
+      return {
+        message: 'If an account with that email exists and is not verified, a new verification link has been sent.',
+      };
+    }
+
+    // Check if already verified
+    if (user.status === UserStatus.VERIFIED || user.isVerified) {
+      this.logger.debug(`User already verified: ${email}`);
+      return {
+        message: 'Your account is already verified. You can now log in.',
+      };
+    }
+
+    // Generate new verification token
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    
+    // Update user with new token
+    await user.update({
+      verificationToken,
+    });
+
+    // Send verification email
+    try {
+      await this.emailService.sendVerificationEmail(email, verificationToken);
+      this.logger.debug(`Resent verification email to: ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to resend verification email to ${email}:`, error.message);
+      throw new BadRequestException('Failed to send verification email. Please try again later.');
+    }
+
+    return {
+      message: 'If an account with that email exists and is not verified, a new verification link has been sent.',
+    };
+  }
+
+  async deleteAccount(userId: string): Promise<{ message: string }> {
+    this.logger.debug(`Delete account request for user: ${userId}`);
+    await this.usersService.deleteAccount(userId);
+    return {
+      message: 'Your account has been deleted successfully. You can now create a new account with your email.',
+    };
+  }
+}
