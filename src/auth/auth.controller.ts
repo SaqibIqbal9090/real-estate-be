@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Get, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Get, UseGuards, Request, Query, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -6,6 +6,7 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyResetTokenDto } from './dto/verify-reset-token.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @ApiTags('Authentication')
@@ -25,7 +26,7 @@ export class AuthController {
     schema: {
       type: 'object',
       properties: {
-        message: { type: 'string', example: 'User registered successfully' },
+        message: { type: 'string', example: 'User registered successfully. Please check your email to verify your account.' },
         user: {
           type: 'object',
           properties: {
@@ -95,12 +96,12 @@ export class AuthController {
   })
   @ApiResponse({ 
     status: 401, 
-    description: 'Unauthorized - invalid credentials',
+    description: 'Unauthorized - invalid credentials or email not verified',
     schema: {
       type: 'object',
       properties: {
         statusCode: { type: 'number', example: 401 },
-        message: { type: 'string', example: 'Invalid credentials' },
+        message: { type: 'string', example: 'Invalid credentials or email not verified' },
         error: { type: 'string', example: 'Unauthorized' }
       }
     }
@@ -270,4 +271,105 @@ export class AuthController {
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(resetPasswordDto);
   }
-} 
+
+  @Get('verify-email')
+  @ApiOperation({ 
+    summary: 'Verify email address',
+    description: 'Verify user email address using the token sent during registration'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Email verified successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Email verified successfully. You can now log in.' }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Bad request - invalid or expired token',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: { type: 'string', example: 'Invalid or expired verification token.' },
+        error: { type: 'string', example: 'Bad Request' }
+      }
+    }
+  })
+  async verifyEmail(@Query('token') token: string) {
+    return this.authService.verifyEmail(token);
+  }
+
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Resend verification email',
+    description: 'Resend the verification email to the user if their account is not yet verified'
+  })
+  @ApiBody({ type: ResendVerificationDto })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Resend verification email request processed',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { 
+          type: 'string', 
+          example: 'If an account with that email exists and is not verified, a new verification link has been sent.' 
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Bad request - validation failed or email sending failed',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: { type: 'string', example: 'Failed to send verification email. Please try again later.' },
+        error: { type: 'string', example: 'Bad Request' }
+      }
+    }
+  })
+  async resendVerification(@Body() resendVerificationDto: ResendVerificationDto) {
+    return this.authService.resendVerificationEmail(resendVerificationDto);
+  }
+
+  @Delete('delete')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ 
+    summary: 'Delete user account',
+    description: 'Soft delete the user account by mutating the email and name, allowing the email to be reused'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Account deleted successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Your account has been deleted successfully.' }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Unauthorized - invalid or missing token',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'Unauthorized' }
+      }
+    }
+  })
+  async deleteAccount(@Request() req: any) {
+    return this.authService.deleteAccount(req.user.userId);
+  }
+}
