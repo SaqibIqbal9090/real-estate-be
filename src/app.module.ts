@@ -8,6 +8,7 @@ import { PropertiesModule } from './properties/properties.module';
 import { BuyRequestsModule } from './buy-requests/buy-requests.module';
 import { SellRequestsModule } from './sell-requests/sell-requests.module';
 import { ContactModule } from './contact/contact.module';
+import { InsuranceModule } from './insurance/insurance.module';
 import { databaseConfig } from './config/database.config';
 import { SchedulerModule } from './scheduler/scheduler.module';
 
@@ -22,6 +23,7 @@ import { SchedulerModule } from './scheduler/scheduler.module';
     BuyRequestsModule,
     SellRequestsModule,
     ContactModule,
+    InsuranceModule,
     SchedulerModule,
   ],
   controllers: [AppController],
