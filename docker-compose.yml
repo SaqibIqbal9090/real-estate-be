@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# LOCAL DEVELOPMENT ONLY
+#
+# Spins up a PostgreSQL instance so you don't need Postgres installed on your
+# machine. This file is NOT used in production or any deployed environment —
+# those use their own managed/hosted database.
+#
+# Credentials are read from the existing .env (DB_USERNAME / DB_PASSWORD /
+# DB_NAME / DB_PORT) so the container always matches your app config.
+#
+# Usage:
+#   docker compose up -d      # start the database in the background
+#   docker compose down       # stop it (data is kept in the named volume)
+#   docker compose down -v    # stop it AND wipe all data
+# ---------------------------------------------------------------------------
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: real-estate-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-admin}
+      POSTGRES_DB: ${DB_NAME:-real_estate}
+    ports:
+      # host:container — host port comes from .env (DB_PORT), defaults to 5432
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - real_estate_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-real_estate}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  real_estate_pgdata:
+    name: real_estate_pgdata

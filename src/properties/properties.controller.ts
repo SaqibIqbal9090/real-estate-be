@@ -198,6 +198,9 @@ export class PropertiesController {
   @ApiQuery({ name: 'maxPrice', required: false, type: 'string', description: 'Maximum price filter', example: '500000' })
   @ApiQuery({ name: 'propertyType', required: false, type: 'string', description: 'Property type filter', example: 'Single Family' })
   @ApiQuery({ name: 'bedrooms', required: false, type: 'string', description: 'Number of bedrooms', example: '3' })
+  @ApiQuery({ name: 'city', required: false, type: 'string', description: 'City filter (partial, case-insensitive)', example: 'Houston' })
+  @ApiQuery({ name: 'state', required: false, type: 'string', description: 'State filter (partial, case-insensitive)', example: 'TX' })
+  @ApiQuery({ name: 'listType', required: false, type: 'string', description: 'Listing type: sale, lease, both', example: 'sale' })
   @ApiQuery({ name: 'bathrooms', required: false, type: 'string', description: 'Number of bathrooms', example: '2' })
   @ApiQuery({ name: 'minSqft', required: false, type: 'string', description: 'Minimum square footage', example: '1000' })
   @ApiQuery({ name: 'maxSqft', required: false, type: 'string', description: 'Maximum square footage', example: '5000' })
@@ -250,6 +253,9 @@ export class PropertiesController {
     @Query('minSqft') minSqft?: string,
     @Query('maxSqft') maxSqft?: string,
     @Query('amenities') amenities?: string,
+    @Query('city') city?: string,
+    @Query('state') state?: string,
+    @Query('listType') listType?: string,
   ) {
     const options = {
       page: page ? parseInt(page) : 1,
@@ -263,6 +269,11 @@ export class PropertiesController {
       minSqft: minSqft ? parseFloat(minSqft) : undefined,
       maxSqft: maxSqft ? parseFloat(maxSqft) : undefined,
       amenities: amenities ? amenities.split(',').map(a => a.trim()).filter(a => a) : undefined,
+      // City/state/listType filtering (service already supports these) — used by
+      // the SEO landing pages, e.g. /buy/3-bed-houses/houston.
+      city: city || undefined,
+      state: state || undefined,
+      listType: listType || undefined,
     };
 
     return this.propertiesService.findAll(options);
