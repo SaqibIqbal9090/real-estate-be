@@ -565,5 +565,222 @@ export class EmailService {
       this.logger.warn('Sell request was created successfully, but admin notification email failed.');
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Insurance quote emails
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Turn a human label and a details object into HTML table rows.
+   * Handles nested arrays of objects (e.g. vehicles, drivers) as sub-tables.
+   */
+  private renderDetailsRows(details: Record<string, any> | undefined | null): string {
+    if (!details || typeof details !== 'object') {
+      return '<tr><td style="padding: 8px;" colspan="2">No additional details provided</td></tr>';
+    }
+
+    const humanize = (key: string): string =>
+      key
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^./, (c) => c.toUpperCase());
+
+    const formatScalar = (value: any): string => {
+      if (value === null || value === undefined || value === '') return 'Not specified';
+      if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+      if (Array.isArray(value)) return value.length ? value.join(', ') : 'Not specified';
+      return String(value);
+    };
+
+    const rows: string[] = [];
+
+    for (const [key, value] of Object.entries(details)) {
+      // Array of objects -> render each as its own labelled block
+      if (Array.isArray(value) && value.some((v) => v && typeof v === 'object')) {
+        value.forEach((item, index) => {
+          const subRows = Object.entries(item || {})
+            .map(
+              ([k, v]) =>
+                `<tr><td style="padding: 6px 8px; border-bottom: 1px solid #eee; width: 45%;"><strong>${humanize(
+                  k,
+                )}</strong></td><td style="padding: 6px 8px; border-bottom: 1px solid #eee;">${formatScalar(
+                  v,
+                )}</td></tr>`,
+            )
+            .join('');
+          rows.push(
+            `<tr><td colspan="2" style="padding: 10px 8px 4px;"><strong style="color:#007bff;">${humanize(
+              key,
+            )} #${index + 1}</strong></td></tr>`,
+            `<tr><td colspan="2" style="padding: 0 8px 10px;"><table style="width:100%; border-collapse: collapse;">${subRows}</table></td></tr>`,
+          );
+        });
+        continue;
+      }
+
+      // Nested plain object
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const subRows = Object.entries(value)
+          .map(
+            ([k, v]) =>
+              `<tr><td style="padding: 6px 8px; border-bottom: 1px solid #eee; width: 45%;"><strong>${humanize(
+                k,
+              )}</strong></td><td style="padding: 6px 8px; border-bottom: 1px solid #eee;">${formatScalar(
+                v,
+              )}</td></tr>`,
+          )
+          .join('');
+        rows.push(
+          `<tr><td colspan="2" style="padding: 10px 8px 4px;"><strong style="color:#007bff;">${humanize(
+            key,
+          )}</strong></td></tr>`,
+          `<tr><td colspan="2" style="padding: 0 8px 10px;"><table style="width:100%; border-collapse: collapse;">${subRows}</table></td></tr>`,
+        );
+        continue;
+      }
+
+      rows.push(
+        `<tr><td style="padding: 8px; border-bottom: 1px solid #dee2e6; width: 45%;"><strong>${humanize(
+          key,
+        )}</strong></td><td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatScalar(
+          value,
+        )}</td></tr>`,
+      );
+    }
+
+    return rows.join('');
+  }
+
+  private async sendMailWithTimeout(
+    mailOptions: nodemailer.SendMailOptions,
+    label: string,
+  ): Promise<void> {
+    const startTime = Date.now();
+    const sendPromise = this.transporter.sendMail(mailOptions);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Email send timeout after 30 seconds')), 30000),
+    );
+    const info = (await Promise.race([sendPromise, timeoutPromise])) as nodemailer.SentMessageInfo;
+    const duration = Date.now() - startTime;
+    this.logger.log(`${label} sent in ${duration}ms. Message ID: ${info.messageId}`);
+    if (info.previewUrl) {
+      this.logger.warn(`Preview URL (Ethereal Email - for testing only): ${info.previewUrl}`);
+    }
+  }
+
+  async sendInsuranceRequestToAdmin(insuranceData: {
+    id: string;
+    type: 'home' | 'auto';
+    fullName: string;
+    email: string;
+    phoneNumber?: string;
+    details?: Record<string, any>;
+    createdAt: Date;
+  }): Promise<void> {
+    try {
+      const adminEmail =
+        this.configService.get<string>('ADMIN_EMAIL') ||
+        this.configService.get<string>('SMTP_USER') ||
+        'realestatemarketplaceintl@gmail.com';
+
+      if (!adminEmail || adminEmail.trim() === '') {
+        this.logger.warn('No admin email configured. Skipping insurance notification.');
+        return;
+      }
+
+      const typeLabel = insuranceData.type === 'home' ? 'Home' : 'Auto';
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: this.configService.get<string>('FROM_EMAIL') || 'noreply@realestate.com',
+        to: adminEmail,
+        replyTo: insuranceData.email,
+        subject: `New ${typeLabel} Insurance Quote Request from ${insuranceData.fullName} - Real Estate Marketplace`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px;">
+              New ${typeLabel} Insurance Quote Request
+            </h2>
+
+            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <h3 style="color: #007bff; margin-top: 0;">Contact Information</h3>
+              <p><strong>Name:</strong> ${insuranceData.fullName}</p>
+              <p><strong>Email:</strong> <a href="mailto:${insuranceData.email}">${insuranceData.email}</a></p>
+              ${insuranceData.phoneNumber ? `<p><strong>Phone:</strong> <a href="tel:${insuranceData.phoneNumber}">${insuranceData.phoneNumber}</a></p>` : ''}
+              <p><strong>Insurance Type:</strong> ${typeLabel}</p>
+              <p><strong>Request ID:</strong> ${insuranceData.id}</p>
+              <p><strong>Submitted:</strong> ${insuranceData.createdAt.toLocaleString()}</p>
+            </div>
+
+            <div style="background-color: #ffffff; padding: 15px; border: 1px solid #dee2e6; border-radius: 5px; margin: 20px 0;">
+              <h3 style="color: #007bff; margin-top: 0;">Quote Details</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                ${this.renderDetailsRows(insuranceData.details)}
+              </table>
+            </div>
+
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; color: #666; font-size: 12px;">
+              <p>This is an automated notification from the Real Estate Marketplace insurance form.</p>
+              <p>Reply directly to this email to follow up with ${insuranceData.fullName}.</p>
+            </div>
+          </div>
+        `,
+        priority: 'high' as const,
+        messageId: `<insurance-admin-${Date.now()}-${Math.random().toString(36).substring(7)}@realestate.com>`,
+      };
+
+      await this.sendMailWithTimeout(mailOptions, `Insurance admin notification (${adminEmail})`);
+    } catch (error) {
+      this.logger.error('Failed to send insurance admin notification:', error.message);
+      this.logger.warn('Insurance request was created, but admin notification email failed.');
+    }
+  }
+
+  async sendInsuranceConfirmationToUser(insuranceData: {
+    type: 'home' | 'auto';
+    fullName: string;
+    email: string;
+  }): Promise<void> {
+    try {
+      if (!insuranceData.email || insuranceData.email.trim() === '') {
+        this.logger.warn('No user email provided. Skipping insurance confirmation.');
+        return;
+      }
+
+      const typeLabel = insuranceData.type === 'home' ? 'home' : 'auto';
+
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: this.configService.get<string>('FROM_EMAIL') || 'noreply@realestate.com',
+        to: insuranceData.email,
+        subject: `We received your ${typeLabel} insurance quote request - Real Estate Marketplace`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #333;">Thanks, ${insuranceData.fullName}!</h2>
+            <p>We've received your request for a <strong>${typeLabel} insurance</strong> quote.</p>
+            <p>One of our licensed agents will review your information and reach out shortly with personalized quotes. No action is needed from you right now.</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000'}"
+                 style="background-color: #ff5a3c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                Browse Properties
+              </a>
+            </div>
+            <p>If you have any questions, just reply to this email.</p>
+            <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+            <p style="color: #666; font-size: 12px;">Real Estate Marketplace &middot; This is an automated confirmation.</p>
+          </div>
+        `,
+        priority: 'high' as const,
+        messageId: `<insurance-user-${Date.now()}-${Math.random().toString(36).substring(7)}@realestate.com>`,
+      };
+
+      await this.sendMailWithTimeout(
+        mailOptions,
+        `Insurance confirmation to user (${insuranceData.email})`,
+      );
+    } catch (error) {
+      this.logger.error('Failed to send insurance confirmation to user:', error.message);
+    }
+  }
 }
 
