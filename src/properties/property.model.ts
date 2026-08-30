@@ -31,6 +31,24 @@ export class Property extends Model<Property> {
   })
   status: 'draft' | 'published';
 
+  // Ownership verification for the sell flow: a seller's claim starts as
+  // 'unverified' (editing/publishing locked) until an admin verifies it.
+  @Column({
+    type: DataType.STRING,
+    defaultValue: 'verified',
+    allowNull: false,
+  })
+  verificationStatus: 'unverified' | 'verified';
+
+  // Set on seller-owned copies created at verification time; points at the
+  // HAR/catalog original, which is never modified. A published copy
+  // supersedes its original in public listings.
+  @Column({
+    type: DataType.UUID,
+    allowNull: true,
+  })
+  sourcePropertyId: string | null;
+
   // Listing Information
   @Column({
     type: DataType.STRING,

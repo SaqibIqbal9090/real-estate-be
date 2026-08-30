@@ -244,6 +244,7 @@ export class PropertiesController {
   async findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('q') q?: string,
     @Query('zipCode') zipCode?: string,
     @Query('minPrice') minPrice?: string,
     @Query('maxPrice') maxPrice?: string,
@@ -260,6 +261,8 @@ export class PropertiesController {
     const options = {
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 10,
+      // Free-text address search — combines with the other filters
+      q: q || undefined,
       zipCode,
       propertyType: propertyType ? propertyType.split(',').filter(t => t.trim()) : undefined,
       minPrice: minPrice ? parseFloat(minPrice) : undefined,
@@ -339,8 +342,58 @@ export class PropertiesController {
     });
   }
 
+  // NOTE: must stay declared above @Get(':id') or Nest will route it to findOne.
+  @Get('address-search')
+  @ApiOperation({
+    summary: 'Address autocomplete search',
+    description:
+      'Typeahead search for the sell flow. Matches every word of the query against the full property address (street number, direction, street name, street type, unit, city, state, ZIP), so partial or full addresses like "3107 Sweet Audrey Lane Richmond TX 77406" both work. Returns lightweight suggestions for published properties. Queries shorter than 3 characters return an empty list.',
+  })
+  @ApiQuery({ name: 'q', required: true, type: 'string', description: 'Full or partial address', example: '3107 Sweet Audrey Lane Richmond TX 77406' })
+  @ApiQuery({ name: 'limit', required: false, type: 'string', description: 'Max suggestions to return (default 8, max 20)', example: '8' })
+  @ApiResponse({
+    status: 200,
+    description: 'Address suggestions retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        count: { type: 'number', example: 2 },
+        suggestions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', example: '550e8400-e29b-41d4-a716-446655440000' },
+              address: { type: 'string', example: '3107 Sweet Audrey Lane, Richmond, TX 77406' },
+              city: { type: 'string', example: 'Richmond' },
+              state: { type: 'string', example: 'TX' },
+              zipCode: { type: 'string', example: '77406' },
+              listType: { type: 'string', example: 'sale' },
+              listPrice: { type: 'number', example: 450000 },
+              bedrooms: { type: 'number', example: 3 },
+              bathsFull: { type: 'number', example: 2 },
+              bathshalf: { type: 'number', example: 1 },
+              buildingSqft: { type: 'number', example: 2500 },
+              propertyType: { type: 'array', items: { type: 'string' }, example: ['Single Family'] },
+              thumbnail: { type: 'string', nullable: true, example: 'https://bucket.s3.amazonaws.com/image.jpg' },
+            },
+          },
+        },
+      },
+    },
+  })
+  async searchByAddress(
+    @Query('q') query: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.propertiesService.searchByAddress(
+      query,
+      limit ? parseInt(limit) : 8,
+    );
+  }
+
   @Get('stats')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get property statistics',
     description: 'Retrieve aggregated statistics about properties including total count, average price, and distribution by type and state'
   })
@@ -493,10 +546,27 @@ export class PropertiesController {
     };
   }
 
+  // NOTE: there is no admin-role system yet, so any authenticated user can
+  // call this. Lock it down once roles exist.
+  @Patch(':id/verify')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Verify property ownership (admin)',
+    description:
+      'Marks a claimed property as ownership-verified and transfers it to the latest sell-request claimant, unlocking editing and publishing for them. Intended for the manual admin verification step of the sell flow.',
+  })
+  @ApiParam({ name: 'id', description: 'Property ID', example: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Property ownership verified successfully' })
+  @ApiResponse({ status: 404, description: 'Property not found' })
+  async verifyProperty(@Param('id') id: string) {
+    return this.propertiesService.verifyProperty(id);
+  }
+
   @Patch(':id/publish')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Publish a draft property',
     description: 'Convert a draft property to published status. Validates that all required fields are present before publishing.'
   })
