@@ -1,5 +1,6 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
   UseGuards,
@@ -86,10 +87,27 @@ export class SellRequestsController {
   async create(@Body() createSellRequestDto: CreateSellRequestDto, @Request() req: any) {
     // Set the userId from the authenticated user
     const sellRequest = await this.sellRequestsService.create(createSellRequestDto, req.user.userId);
-    
+
     return {
       message: 'Sell request created successfully',
       sellRequest,
+    };
+  }
+
+  @Get('my-requests')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Get my sell requests',
+    description:
+      "Returns the authenticated user's sell requests, newest first. Requests with a propertyId claim a catalog property (shown in My Properties as verification pending); requests without one were submitted with a manually typed address and are reviewed by the admin.",
+  })
+  @ApiResponse({ status: 200, description: 'Sell requests retrieved successfully' })
+  async findMyRequests(@Request() req: any) {
+    const sellRequests = await this.sellRequestsService.findByUserId(req.user.userId);
+    return {
+      count: sellRequests.length,
+      sellRequests,
     };
   }
 }

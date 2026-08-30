@@ -446,6 +446,9 @@ export class EmailService {
       email: string;
       phoneNumber: string;
       createdAt: Date;
+      // Catalog property claimed by this request; null/undefined when the
+      // seller typed an address we don't have in the database.
+      propertyId?: string | null;
     },
     userData: {
       fullName: string;
@@ -495,6 +498,14 @@ export class EmailService {
                 <tr>
                   <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Request ID:</strong></td>
                   <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${sellRequestData.id}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Catalog Property:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${
+                    sellRequestData.propertyId
+                      ? `Matched — ID ${sellRequestData.propertyId} (ownership claim pending verification)`
+                      : 'No match — address entered manually by the seller'
+                  }</td>
                 </tr>
                 <tr>
                   <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Home Address:</strong></td>

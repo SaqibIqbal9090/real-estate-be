@@ -64,6 +64,14 @@ export class SellRequest extends Model<SellRequest> {
   })
   declare phoneNumber: string;
 
+  // The catalog property this request claims (sell flow); used by the
+  // admin verification step to transfer ownership to the claimant.
+  @Column({
+    type: DataType.UUID,
+    allowNull: true,
+  })
+  declare propertyId: string | null;
+
   // Relationships
   @ForeignKey(() => User)
   @Column({

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { Property } from './property.model';
+import { SellRequest } from '../sell-requests/sell-request.model';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { Op } from 'sequelize';
 import { Sequelize } from 'sequelize';
@@ -10,6 +11,8 @@ export class PropertiesService {
   constructor(
     @InjectModel(Property)
     private propertyModel: typeof Property,
+    @InjectModel(SellRequest)
+    private sellRequestModel: typeof SellRequest,
   ) {}
 
   // Helper function to map property data to frontend expected format
@@ -178,10 +181,28 @@ export class PropertiesService {
     }
   }
 
+  // Concatenated address expression used for free-text/autocomplete search:
+  // every token of a query must match somewhere in the full address.
+  private fullAddressExpression() {
+    return Sequelize.fn(
+      'concat_ws',
+      ' ',
+      Sequelize.col('streetNo'),
+      Sequelize.col('stDirection'),
+      Sequelize.col('streetName'),
+      Sequelize.col('streetType'),
+      Sequelize.col('unitNo'),
+      Sequelize.col('city'),
+      Sequelize.col('state'),
+      Sequelize.col('zipCode'),
+    );
+  }
+
   async findAll(options: {
     page?: number;
     limit?: number;
     search?: string;
+    q?: string;
     listType?: string;
     minPrice?: number;
     maxPrice?: number;
@@ -200,6 +221,7 @@ export class PropertiesService {
       page = 1,
       limit = 10,
       search,
+      q,
       listType,
       minPrice,
       maxPrice,
@@ -251,6 +273,30 @@ export class PropertiesService {
 
     // Build AND conditions for complex filters
     const andConditions: any[] = [];
+
+    // A seller's published copy supersedes its HAR/catalog original: hide
+    // originals that have a published copy so the same home never lists twice.
+    if (!includeDrafts) {
+      andConditions.push(
+        Sequelize.literal(`NOT EXISTS (
+          SELECT 1 FROM properties AS copies
+          WHERE copies."sourcePropertyId" = "Property"."id"
+            AND copies."status" = 'published'
+        )`) as any,
+      );
+    }
+
+    // Free-text address search ("3017 sweet", "Richmond", "77406", ...):
+    // each word must match the concatenated full address.
+    if (q && q.trim().length >= 2) {
+      const fullAddress = this.fullAddressExpression();
+      const tokens = q.trim().split(/\s+/).slice(0, 10);
+      for (const token of tokens) {
+        andConditions.push(
+          Sequelize.where(fullAddress, { [Op.iLike]: `%${token}%` }) as any,
+        );
+      }
+    }
 
     // Search functionality
     if (search) {
@@ -394,7 +440,26 @@ export class PropertiesService {
     const { page = 1, limit = 10, status } = options;
     const offset = (page - 1) * limit;
 
-    const where: any = { userId };
+    // Besides properties the user owns, include catalog properties they have
+    // claimed via a sell request — those show as "verification pending"
+    // until an admin verifies the claim and transfers ownership.
+    const claims = await this.sellRequestModel.findAll({
+      where: { userId, propertyId: { [Op.ne]: null } },
+      attributes: ['propertyId'],
+    });
+    const claimedIds = claims.map(c => c.propertyId).filter(Boolean) as string[];
+
+    // Claimed originals only show while the claim is still pending; once
+    // verified, the seller's own copy (owned, so matched by userId) takes
+    // their place and the untouched original drops out of this list.
+    const where: any = claimedIds.length
+      ? {
+          [Op.or]: [
+            { userId },
+            { id: { [Op.in]: claimedIds }, verificationStatus: 'unverified' },
+          ],
+        }
+      : { userId };
     // Allow filtering by status, but by default show all (drafts and published) for user's own properties
     if (status) {
       where.status = status;
@@ -433,6 +498,13 @@ export class PropertiesService {
     const property = await this.findOne(id);
     console.log('Property userId:', property.userId, 'Request userId:', userId);
 
+    // Ownership claims must be verified by an admin before any edits
+    if (property.verificationStatus === 'unverified') {
+      throw new ForbiddenException(
+        'This property is pending ownership verification. Editing is enabled once our team verifies your claim.',
+      );
+    }
+
     // Check if user owns the property
     if (property.userId !== userId) {
       throw new ForbiddenException('You can only update your own properties');
@@ -460,6 +532,13 @@ export class PropertiesService {
 
   async publish(id: string, userId: string): Promise<any> {
     const property = await this.findOne(id);
+
+    // Ownership claims must be verified by an admin before publishing
+    if (property.verificationStatus === 'unverified') {
+      throw new ForbiddenException(
+        'This property is pending ownership verification. Publishing is enabled once our team verifies your claim.',
+      );
+    }
 
     // Check if user owns the property
     if (property.userId !== userId) {
@@ -509,6 +588,74 @@ export class PropertiesService {
 
     // Return updated property
     return this.findOne(id);
+  }
+
+  // Admin action for the manual ownership-verification step. The HAR/catalog
+  // original is never modified: verification CLONES it into a seller-owned
+  // draft copy (linked via sourcePropertyId) that the seller can edit and
+  // publish. Once the copy is published it supersedes the original in
+  // public listings; the original row stays untouched for future HAR syncs.
+  async verifyProperty(id: string): Promise<any> {
+    const original = await this.propertyModel.findByPk(id);
+    if (!original) {
+      throw new NotFoundException(`Property with ID ${id} not found`);
+    }
+
+    // The most recent sell request that claimed this property names the owner
+    const claim = await this.sellRequestModel.findOne({
+      where: { propertyId: id },
+      order: [['createdAt', 'DESC']],
+    });
+    if (!claim?.userId) {
+      throw new BadRequestException(
+        'No sell request claims this property, so there is nothing to verify.',
+      );
+    }
+
+    // Idempotent: if this claimant's copy already exists, return it (and
+    // make sure the original's pending flag is cleared).
+    const existingCopy = await this.propertyModel.findOne({
+      where: { sourcePropertyId: id, userId: claim.userId },
+    });
+    if (existingCopy) {
+      await this.propertyModel.update(
+        { verificationStatus: 'verified' },
+        { where: { id } },
+      );
+      return {
+        message: 'Property is already verified',
+        property: this.mapPropertyToFrontendFormat(existingCopy.get({ plain: true })),
+      };
+    }
+
+    const data: any = original.get({ plain: true });
+    delete data.id;
+    delete data.createdAt;
+    delete data.updatedAt;
+    data.userId = claim.userId;
+    data.verificationStatus = 'verified';
+    data.sourcePropertyId = id;
+    // Starts as a draft so the seller reviews/edits before it goes live;
+    // until then the original keeps serving the public listing.
+    data.status = 'draft';
+    // The copy is the seller's own listing, not the MLS record
+    data.mlsNumber = null;
+
+    const copy = await this.propertyModel.create(data);
+
+    // The pending claim on the original is resolved into the copy.
+    // (Static update: instance.update trips over this model's shadowed
+    // class fields.)
+    await this.propertyModel.update(
+      { verificationStatus: 'verified' },
+      { where: { id } },
+    );
+
+    return {
+      message:
+        'Ownership verified — a seller-owned copy was created for editing and publishing',
+      property: this.mapPropertyToFrontendFormat(copy.get({ plain: true })),
+    };
   }
 
   async remove(id: string, userId: string): Promise<void> {
@@ -574,6 +721,86 @@ export class PropertiesService {
       page,
       totalPages: Math.ceil(count / limit),
     };
+  }
+
+  // Address autocomplete for the sell flow. The user types a full address
+  // ("3107 Sweet Audrey Lane Richmond TX 77406") which spans several columns,
+  // so each token must match a concatenated address expression rather than
+  // any single column.
+  async searchByAddress(query: string, limit = 8): Promise<{ count: number; suggestions: any[] }> {
+    const trimmed = (query || '').trim();
+    if (trimmed.length < 3) {
+      return { count: 0, suggestions: [] };
+    }
+
+    const tokens = trimmed.split(/\s+/).slice(0, 10);
+    const fullAddress = this.fullAddressExpression();
+
+    const rows = await this.propertyModel.findAll({
+      where: {
+        status: 'published',
+        [Op.and]: [
+          ...tokens.map(
+            token => Sequelize.where(fullAddress, { [Op.iLike]: `%${token}%` }) as any,
+          ),
+          // Hide originals superseded by a published seller copy
+          Sequelize.literal(`NOT EXISTS (
+            SELECT 1 FROM properties AS copies
+            WHERE copies."sourcePropertyId" = "Property"."id"
+              AND copies."status" = 'published'
+          )`) as any,
+        ],
+      },
+      attributes: [
+        'id',
+        'streetNo',
+        'stDirection',
+        'streetName',
+        'streetType',
+        'unitNo',
+        'city',
+        'state',
+        'zipCode',
+        'listType',
+        'listPrice',
+        'bedrooms',
+        'bathsFull',
+        'bathshalf',
+        'buildingSqft',
+        'propertyType',
+        'images',
+      ],
+      limit: Math.min(Math.max(limit, 1), 20),
+      order: [['createdAt', 'DESC']],
+    });
+
+    const suggestions = rows.map(row => {
+      const p = row.get({ plain: true }) as any;
+      const street = [p.streetNo, p.stDirection, p.streetName, p.streetType]
+        .filter(Boolean)
+        .join(' ');
+      const unit = p.unitNo ? ` #${p.unitNo}` : '';
+      return {
+        id: p.id,
+        address: `${street}${unit}, ${p.city}, ${p.state} ${p.zipCode}`,
+        city: p.city,
+        state: p.state,
+        zipCode: p.zipCode,
+        listType: p.listType,
+        listPrice: p.listPrice,
+        bedrooms: p.bedrooms,
+        bathsFull: p.bathsFull,
+        bathshalf: p.bathshalf,
+        buildingSqft: p.buildingSqft,
+        propertyType: p.propertyType,
+        thumbnail:
+          Array.isArray(p.images) && p.images.length > 0
+            ? p.images[0]?.image_url || null
+            : null,
+      };
+    });
+
+    return { count: suggestions.length, suggestions };
   }
 
   async getPropertyStats(): Promise<{

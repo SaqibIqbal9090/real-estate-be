@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { SellRequest } from './sell-request.model';
+import { Property } from '../properties/property.model';
 import { CreateSellRequestDto } from './dto/create-sell-request.dto';
 import { EmailService } from '../auth/email.service';
 import { UsersService } from '../users/users.service';
@@ -12,6 +13,8 @@ export class SellRequestsService {
   constructor(
     @InjectModel(SellRequest)
     private sellRequestModel: typeof SellRequest,
+    @InjectModel(Property)
+    private propertyModel: typeof Property,
     private emailService: EmailService,
     private usersService: UsersService,
   ) {}
@@ -24,12 +27,35 @@ export class SellRequestsService {
 
     const sellRequest = await this.sellRequestModel.create(sellRequestData as any);
 
+    // A request that claims a catalog property puts that property into the
+    // manual ownership-verification queue: editing and publishing stay
+    // locked until an admin verifies the claim.
+    const propertyId = (createSellRequestDto as any).propertyId;
+    if (propertyId) {
+      try {
+        const property = await this.propertyModel.findByPk(propertyId);
+        if (property) {
+          await property.update({ verificationStatus: 'unverified' });
+          this.logger.log(`Property ${propertyId} marked unverified (sell request ${sellRequest.id})`);
+        }
+      } catch (error) {
+        this.logger.error(`Failed to mark property ${propertyId} unverified:`, error);
+      }
+    }
+
     // Send email notification to admin in the background (don't wait for it)
     this.sendAdminNotification(sellRequest, userId).catch((error) => {
       this.logger.error('Failed to send admin notification:', error);
     });
 
     return sellRequest;
+  }
+
+  async findByUserId(userId: string): Promise<SellRequest[]> {
+    return this.sellRequestModel.findAll({
+      where: { userId },
+      order: [['createdAt', 'DESC']],
+    });
   }
 
   private async sendAdminNotification(sellRequest: SellRequest, userId: string): Promise<void> {
@@ -65,6 +91,7 @@ export class SellRequestsService {
           email: sellRequestData.email,
           phoneNumber: sellRequestData.phoneNumber,
           createdAt: sellRequestData.createdAt ? new Date(sellRequestData.createdAt) : new Date(),
+          propertyId: sellRequestData.propertyId,
         },
         {
           fullName: user.fullName,
