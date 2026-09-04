@@ -577,6 +577,143 @@ export class EmailService {
     }
   }
 
+  async sendRentQuoteNotificationToAdmin(
+    rentRequestData: {
+      homeAddress: string;
+      rentTimeline: string;
+      expectedRent: string;
+      propertyType: string;
+      fullName: string;
+      email: string;
+      phoneNumber: string;
+      createdAt: Date;
+      // Catalog property the owner picked from suggestions; null/undefined
+      // when they typed an address we don't have in the database.
+      propertyId?: string | null;
+    },
+    userData: {
+      fullName: string;
+      email: string;
+    },
+  ): Promise<void> {
+    const startTime = Date.now();
+
+    try {
+      const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || this.configService.get<string>('SMTP_USER') || 'realestatemarketplaceintl@gmail.com';
+
+      if (!adminEmail || adminEmail.trim() === '') {
+        this.logger.warn('No admin email configured. Skipping rent quote email notification.');
+        return;
+      }
+
+      const formatValue = (value: any): string => {
+        if (value === null || value === undefined || value === '') {
+          return 'Not specified';
+        }
+        if (value instanceof Date) {
+          return value.toLocaleString();
+        }
+        return String(value);
+      };
+
+      const mailOptions = {
+        from: this.configService.get<string>('FROM_EMAIL') || 'noreply@realestate.com',
+        to: adminEmail,
+        subject: `New Rent-Out Quote Request from ${userData.fullName} - Real Estate Marketplace`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px;">
+              New Rent-Out Quote Request Received
+            </h2>
+            <p style="color: #555;">A property owner wants to rent out their home and is requesting a rent quote.</p>
+
+            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <h3 style="color: #007bff; margin-top: 0;">Owner Information</h3>
+              <p><strong>Name:</strong> ${userData.fullName}</p>
+              <p><strong>Email:</strong> ${userData.email}</p>
+            </div>
+
+            <div style="background-color: #ffffff; padding: 15px; border: 1px solid #dee2e6; border-radius: 5px; margin: 20px 0;">
+              <h3 style="color: #007bff; margin-top: 0;">Rent Quote Details</h3>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Catalog Property:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${
+                    rentRequestData.propertyId
+                      ? `Matched — ID ${rentRequestData.propertyId}`
+                      : 'No match — address entered manually by the owner'
+                  }</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Property Address:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatValue(rentRequestData.homeAddress)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Rent-Out Timeline:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatValue(rentRequestData.rentTimeline)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Expected Monthly Rent:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatValue(rentRequestData.expectedRent)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Property Type:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatValue(rentRequestData.propertyType)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Full Name:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${formatValue(rentRequestData.fullName)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Email:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><a href="mailto:${rentRequestData.email}">${rentRequestData.email}</a></td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><strong>Phone Number:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;"><a href="tel:${rentRequestData.phoneNumber}">${rentRequestData.phoneNumber}</a></td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px;"><strong>Request Date:</strong></td>
+                  <td style="padding: 8px;">${formatValue(rentRequestData.createdAt)}</td>
+                </tr>
+              </table>
+            </div>
+
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; color: #666; font-size: 12px;">
+              <p>This is an automated notification from the Real Estate Marketplace system.</p>
+              <p>Please contact the owner at <a href="mailto:${userData.email}">${userData.email}</a> to follow up with a rent quote for their property.</p>
+            </div>
+          </div>
+        `,
+        priority: 'high' as const,
+        messageId: `<rent-quote-${Date.now()}-${Math.random().toString(36).substring(7)}@realestate.com>`,
+      };
+
+      // Send email with timeout
+      const sendPromise = this.transporter.sendMail(mailOptions);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Email send timeout after 30 seconds')), 30000)
+      );
+
+      const info = await Promise.race([sendPromise, timeoutPromise]) as nodemailer.SentMessageInfo;
+      const duration = Date.now() - startTime;
+
+      this.logger.log(`Rent quote email sent to admin (${adminEmail}) in ${duration}ms. Message ID: ${info.messageId}`);
+
+      // Log the preview URL for development (Ethereal Email)
+      if (info.previewUrl) {
+        this.logger.warn(`Preview URL (Ethereal Email - for testing only): ${info.previewUrl}`);
+      }
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error(`Failed to send rent quote email to admin after ${duration}ms:`, error.message);
+
+      // Rent requests are not stored anywhere — the email IS the request, so
+      // a send failure must surface to the caller instead of being swallowed.
+      throw new Error(`Failed to send rent quote email: ${error.message}`);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Insurance quote emails
   // ---------------------------------------------------------------------------
