@@ -112,6 +112,10 @@ class HarImporter {
         host: dbHost,
         port: dbPort,
         dialect: 'postgres',
+        // RDS/Aurora enforces SSL; DB_SSL=true enables it (see database.config.ts)
+        ...(process.env.DB_SSL === 'true'
+          ? { dialectOptions: { ssl: { require: true, rejectUnauthorized: false } } }
+          : {}),
         logging: process.env.NODE_ENV === 'development',
         models: [Property, User],
       });

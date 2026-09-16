@@ -7,6 +7,11 @@ export const databaseConfig: SequelizeModuleOptions = {
   username: process.env.DB_USERNAME || 'postgres',
   password: process.env.DB_PASSWORD || 'admin',
   database: process.env.DB_NAME || 'real_estate',
+  // RDS/Aurora enforces SSL (rds.force_ssl); local Postgres doesn't speak it.
+  // Set DB_SSL=true in environments that connect to RDS.
+  ...(process.env.DB_SSL === 'true'
+    ? { dialectOptions: { ssl: { require: true, rejectUnauthorized: false } } }
+    : {}),
   autoLoadModels: true,
 
   // Temporarily enable synchronize to recreate tables after PostgreSQL reinstall
