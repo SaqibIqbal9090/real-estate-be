@@ -18,6 +18,24 @@ interface HarListing {
   PropertySubType?: string;
   StandardStatus: string;
   MlsStatus: string;
+  // Display consent / feed eligibility
+  InternetEntireListingDisplayYN?: boolean;
+  InternetAddressDisplayYN?: boolean;
+  IDXParticipationYN?: boolean;
+  FeedTypes?: string[];
+  // Sync watermarks
+  ModificationTimestamp?: string;
+  PhotosChangeTimestamp?: string;
+  StatusChangeTimestamp?: string;
+  PriceChangeTimestamp?: string;
+  // Listing context (Longitude / ListOfficePhone are declared further down)
+  OriginalListPrice?: number;
+  UnparsedAddress?: string;
+  LotSizeArea?: number;
+  LotSizeUnits?: string;
+  Utilities?: string[];
+  DaysOnMarket?: number;
+  PhotosCount?: number;
   StreetNumber?: string;
   StreetDirPrefix?: string;
   StreetName?: string;
@@ -85,8 +103,38 @@ function listingMlsStatus(harListing: HarListing): string {
   return harListing.MlsStatus || harListing.StandardStatus || '';
 }
 
+/**
+ * A listing may be shown publicly only if all three hold:
+ *  1. its MLS status is Active/Pending-family (HRIS agreement §5a),
+ *  2. the seller has not opted out of internet display, and
+ *  3. the feed marks it IDX-eligible (VOW-only listings are login-gated).
+ *
+ * Fields absent from the feed are treated as permissive so that listings
+ * imported before these were captured aren't retroactively hidden; only an
+ * explicit denial suppresses a listing.
+ */
 function isPubliclyDisplayable(harListing: HarListing): boolean {
-  return PUBLIC_MLS_STATUSES.includes(listingMlsStatus(harListing).trim().toLowerCase());
+  const statusOk = PUBLIC_MLS_STATUSES.includes(
+    listingMlsStatus(harListing).trim().toLowerCase(),
+  );
+  if (!statusOk) return false;
+
+  if (harListing.InternetEntireListingDisplayYN === false) return false;
+  if (harListing.IDXParticipationYN === false) return false;
+
+  const feedTypes = harListing.FeedTypes;
+  if (Array.isArray(feedTypes) && feedTypes.length > 0) {
+    const idxEligible = feedTypes.some((t) => String(t).trim().toUpperCase() === 'IDX');
+    if (!idxEligible) return false;
+  }
+
+  return true;
+}
+
+function toDate(value: any): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 // Postgres aborts an entire statement with "numeric field overflow" when a
@@ -184,6 +232,30 @@ class HarImporter {
       status: isPubliclyDisplayable(harListing) ? 'published' : 'off_market',
       mlsStatus: listingMlsStatus(harListing) || null,
 
+      // Display consent — an explicit false must suppress public display
+      internetDisplayAllowed: harListing.InternetEntireListingDisplayYN ?? null,
+      addressDisplayAllowed: harListing.InternetAddressDisplayYN ?? null,
+      feedTypes: Array.isArray(harListing.FeedTypes) ? harListing.FeedTypes : null,
+
+      // Sync watermarks
+      modificationTimestamp: toDate(harListing.ModificationTimestamp),
+      photosChangeTimestamp: toDate(harListing.PhotosChangeTimestamp),
+      statusChangeTimestamp: toDate(harListing.StatusChangeTimestamp),
+      priceChangeTimestamp: toDate(harListing.PriceChangeTimestamp),
+
+      // Geo — required for map search
+      latitude: harListing.Latitude ?? null,
+      longitude: harListing.Longitude ?? null,
+
+      // Attribution (IDX rules require showing the listing office) + context
+      unparsedAddress: harListing.UnparsedAddress || null,
+      utilities: Array.isArray(harListing.Utilities) ? harListing.Utilities : null,
+      listOfficeName: harListing.ListOfficeName || null,
+      listOfficePhone: harListing.ListOfficePhone || null,
+      originalListPrice: harListing.OriginalListPrice ?? null,
+      daysOnMarket: harListing.DaysOnMarket ?? null,
+      photosCount: harListing.PhotosCount ?? null,
+
       // Listing Information
       listType: this.determineListType(harListing),
       listPrice: harListing.ListPrice || 0,
@@ -230,6 +302,9 @@ class HarImporter {
         : undefined,
       lotSizeSource: harListing.LotSizeSource || undefined,
       acres: harListing.LotSizeAcres ? String(harListing.LotSizeAcres) : undefined,
+      // The MLS's own value + unit, which survives sizes that overflow lotSize
+      lotSizeArea: harListing.LotSizeArea ?? null,
+      lotSizeUnits: harListing.LotSizeUnits || null,
       lotDimenssions: harListing.LotSizeDimensions || undefined,
 
       // Bedrooms and Bathrooms
