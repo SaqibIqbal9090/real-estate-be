@@ -198,6 +198,36 @@ export class PropertiesService {
     );
   }
 
+  /**
+   * Cached COUNT for the public listing endpoint.
+   *
+   * Counting matching rows costs seconds on the full catalog, and the result
+   * only changes when the HAR importer runs (every 2 hours) or a user
+   * publishes. A short TTL keeps pagination totals fresh enough while taking
+   * the count off the critical path for virtually every request.
+   */
+  private static countCache = new Map<string, { value: number; at: number }>();
+  private static readonly COUNT_TTL_MS = 120_000;
+  private static readonly COUNT_CACHE_MAX = 200;
+
+  private async getCachedCount(key: string, where: any): Promise<number> {
+    const now = Date.now();
+    const hit = PropertiesService.countCache.get(key);
+    if (hit && now - hit.at < PropertiesService.COUNT_TTL_MS) {
+      return hit.value;
+    }
+
+    const value = await this.propertyModel.count({ where });
+
+    // Bound the cache so unusual filter combinations can't grow it forever.
+    if (PropertiesService.countCache.size >= PropertiesService.COUNT_CACHE_MAX) {
+      const oldest = PropertiesService.countCache.keys().next().value;
+      if (oldest !== undefined) PropertiesService.countCache.delete(oldest);
+    }
+    PropertiesService.countCache.set(key, { value, at: now });
+    return value;
+  }
+
   async findAll(options: {
     page?: number;
     limit?: number;
@@ -376,19 +406,32 @@ export class PropertiesService {
       }
     }
 
-    const { count, rows } = await this.propertyModel.findAndCountAll({
-      where,
-      limit,
-      offset,
-      order: [['createdAt', 'DESC']],
-      include: [
-        {
-          model: require('../users/user.model').User,
-          as: 'user',
-          attributes: ['id', 'fullName', 'email'],
-        },
-      ],
+    // The row query is index-served and fast, but COUNT(*) has to walk every
+    // matching row (~2.6s over the full published set). Listings only change
+    // when the HAR importer runs, so the total is cached briefly per filter
+    // combination rather than recomputed on every page view. The two queries
+    // also run concurrently instead of sequentially.
+    const countKey = JSON.stringify({
+      search, q, listType, minPrice, maxPrice, city, state, zipCode,
+      bedrooms, bathrooms, propertyType, minSqft, maxSqft, amenities, includeDrafts,
     });
+
+    const [rows, count] = await Promise.all([
+      this.propertyModel.findAll({
+        where,
+        limit,
+        offset,
+        order: [['createdAt', 'DESC']],
+        include: [
+          {
+            model: require('../users/user.model').User,
+            as: 'user',
+            attributes: ['id', 'fullName', 'email'],
+          },
+        ],
+      }),
+      this.getCachedCount(countKey, where),
+    ]);
 
     // Map the properties to include all expected fields
     const mappedProperties = rows.map(property => {

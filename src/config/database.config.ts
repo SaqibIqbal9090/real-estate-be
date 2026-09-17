@@ -18,8 +18,10 @@ export const databaseConfig: SequelizeModuleOptions = {
   synchronize: true,
   logging: process.env.NODE_ENV === 'development',
   pool: {
-    max: 5,
-    min: 0,
+    // 5 was too small: concurrent listing requests (and the sitemap build,
+    // which fans out dozens of counts) queued behind each other.
+    max: parseInt(process.env.DB_POOL_MAX ?? '20', 10),
+    min: 2,
     acquire: 30000,
     idle: 10000,
   },
