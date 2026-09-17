@@ -2,6 +2,7 @@ import axios from 'axios';
 import { Sequelize } from 'sequelize-typescript';
 import { Property } from '../properties/property.model';
 import { User } from '../users/user.model';
+import { derivePropertyCategory } from '../properties/property-category';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -209,8 +210,10 @@ class HarImporter {
         ? String(harListing.HAR_CensusTract)
         : undefined,
 
-      // Property Type
+      // Property Type — raw values kept for display, plus a canonical
+      // category for filtering
       propertyType: this.mapPropertyType(harListing),
+      propertyCategory: derivePropertyCategory(this.mapPropertyType(harListing)),
 
       // Building Information
       buildingSqft: harListing.LivingArea ?? undefined,

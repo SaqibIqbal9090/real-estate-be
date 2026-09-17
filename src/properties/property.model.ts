@@ -42,6 +42,15 @@ export class Property extends Model<Property> {
   })
   mlsStatus: string | null;
 
+  // Canonical category derived from the raw propertyType strings at import
+  // (see property-category.ts). Indexed, so filtering is a plain equality
+  // instead of a JSON scan that matched nothing.
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  propertyCategory: string | null;
+
   // Ownership verification for the sell flow: a seller's claim starts as
   // 'unverified' (editing/publishing locked) until an admin verifies it.
   @Column({
