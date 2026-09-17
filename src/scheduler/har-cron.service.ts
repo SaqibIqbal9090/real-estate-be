@@ -18,23 +18,31 @@ export class HarCronService {
             return;
         }
 
-        this.logger.log('Starting periodic HAR import job via child process (200 records)...');
+        this.logger.log('Starting periodic HAR incremental sync...');
 
-        // Spawn a child process to run the import script
-        // MAX_LISTINGS=200 npm run har:import
-
-        const child = spawn('npm', ['run', 'har:import'], {
-            env: { ...process.env, MAX_LISTINGS: '500' },
+        // har:sync fetches only listings changed since the last run and upserts
+        // them, so status/price/photo changes are picked up. The old har:import
+        // walked the whole feed and only inserted, which left sold listings
+        // published and prices stale.
+        const child = spawn('npm', ['run', 'har:sync'], {
+            env: { ...process.env },
             shell: true,
             cwd: process.cwd(),
         });
 
         child.stdout.on('data', (data) => {
-            this.logger.log(`[HAR Import]: ${data.toString().trim()}`);
+            this.logger.log(`[HAR Sync]: ${data.toString().trim()}`);
         });
 
         child.stderr.on('data', (data) => {
-            this.logger.error(`[HAR Import Error]: ${data.toString().trim()}`);
+            // npm and Sequelize write warnings to stderr; only surface real
+            // failures as errors so the logs stay readable.
+            const text = data.toString().trim();
+            if (/error|failed|fatal/i.test(text)) {
+                this.logger.error(`[HAR Sync Error]: ${text}`);
+            } else {
+                this.logger.debug(`[HAR Sync]: ${text}`);
+            }
         });
 
         child.on('close', (code) => {
