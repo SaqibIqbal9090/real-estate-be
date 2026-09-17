@@ -3,13 +3,18 @@
 // DB settings silently fall back to localhost.
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
+import * as compression from 'compression';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
+
+  // Property payloads are large, repetitive JSON (long arrays of CDN image
+  // URLs), which gzips to a fraction of its size.
+  app.use(compression());
+
   // Enable CORS
   app.enableCors();
   
