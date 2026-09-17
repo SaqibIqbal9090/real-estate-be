@@ -56,8 +56,10 @@ async function main() {
       where: { propertyCategory: null as any },
       attributes: ['id', 'propertyType'],
       limit: BATCH_SIZE,
-      // Stable order so an interrupted run resumes predictably
-      order: [['id', 'ASC']],
+      // Deliberately unordered. ORDER BY forced Postgres to scan and sort the
+      // entire NULL set on every batch (~70s each over 200k rows); unordered,
+      // it can stop as soon as LIMIT is satisfied. Progress is still
+      // guaranteed because each batch stops matching once it's written.
       raw: true,
     });
 
