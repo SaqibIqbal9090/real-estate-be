@@ -84,3 +84,57 @@ Local smoke test (small): `MAX_PAGES=2 npm run har:backfill:fetch` then load aga
 - MLS data is licensed, not owned: no redistribution, no AI training, and on license termination all copies (including the JSONL files) must be deleted (§17).
 - Every page displaying MLS data must carry: `Data provided by HAR.com © Copyright <year> "All information provided should be independently verified."`
 - Delete `har-backfill-data/` from the worker once the load is verified; terminate or stop the worker instance.
+
+---
+
+## Incremental sync (replaces the old periodic import)
+
+`npm run har:sync` — what the 2-hourly cron now runs.
+
+The previous `har:import` walked the whole feed by `ListingKey` and only ever
+INSERTed, so once a listing was imported it was never updated: sold listings
+stayed publicly displayed and prices went stale. The sync fetches only
+listings whose `ModificationTimestamp` is newer than what we hold and
+**upserts** them — new listings inserted, existing ones refreshed in place
+including status, price, photos and display consent.
+
+**Watermark:** `MAX(properties.modificationTimestamp)` minus an overlap
+(default 15 min) so records written mid-run aren't skipped. Re-processing a
+few listings is harmless because the operation is an upsert.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `HAR_SYNC_FILTER` | residential sale + lease | base OData filter |
+| `HAR_SYNC_SINCE` | — | ISO date overriding the watermark (backfill a gap) |
+| `HAR_SYNC_OVERLAP_MIN` | `15` | minutes re-checked before the watermark |
+| `HAR_SYNC_MAX_PAGES` | `200` | safety cap per run (~40k listings) |
+
+Guards: listings owned by a real user are never overwritten (HAR originals are
+owned by `HAR_IMPORT_USER_ID`; the sell flow makes a separate copy), and a
+listing is skipped when our copy is already at least as fresh as the feed's.
+
+### Display consent
+
+`isPubliclyDisplayable` now requires all of:
+
+1. MLS status in Active / Option Pending / Pending Continuing to Show / Pending
+2. `InternetEntireListingDisplayYN` is not false (seller opt-out)
+3. `IDXParticipationYN` is not false
+4. `FeedTypes` includes `IDX` (VOW-only listings are login-gated)
+
+Missing fields are treated as permissive so rows imported before these were
+captured aren't retroactively hidden — only an explicit denial suppresses a
+listing. The public list and detail queries enforce the same rule independently.
+
+### Fields captured as of Sep 18, 2026
+
+Display consent (`internetDisplayAllowed`, `addressDisplayAllowed`,
+`feedTypes`), sync watermarks (`modificationTimestamp`,
+`photosChangeTimestamp`, `statusChangeTimestamp`, `priceChangeTimestamp`),
+geo (`latitude`, `longitude` — required for map search), and listing context
+(`listOfficeName`, `listOfficePhone`, `originalListPrice`, `daysOnMarket`,
+`photosCount`).
+
+Existing rows keep NULLs until re-imported. To populate them for the current
+catalogue, run a sync with a far-back `HAR_SYNC_SINCE`, or re-run the bulk
+backfill.
