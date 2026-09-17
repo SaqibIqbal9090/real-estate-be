@@ -1,3 +1,7 @@
+// Must be first: database.config.ts reads process.env when app.module.ts is
+// imported, which happens before Nest's ConfigModule runs. Without this the
+// DB settings silently fall back to localhost.
+import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';

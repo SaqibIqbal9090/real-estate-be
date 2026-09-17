@@ -25,6 +25,8 @@
     "db:seed": "npx sequelize-cli db:seed:all",
     "db:seed:undo": "npx sequelize-cli db:seed:undo:all",
     "har:import": "ts-node -r tsconfig-paths/register src/scripts/har-import.ts",
+    "har:backfill:fetch": "ts-node -r tsconfig-paths/register src/scripts/har-backfill-fetch.ts",
+    "har:backfill:load": "ts-node -r tsconfig-paths/register src/scripts/har-backfill-load.ts",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",

@@ -18,6 +18,13 @@ const getPort = (defaultPort = 5432) => {
   return parseInt(cleanedPort, 10) || defaultPort;
 };
 
+// RDS/Aurora enforces SSL (rds.force_ssl); local Postgres doesn't speak it.
+// Set DB_SSL=true when running migrations against RDS.
+const sslOptions = () =>
+  process.env.DB_SSL === 'true'
+    ? { dialectOptions: { ssl: { require: true, rejectUnauthorized: false } } }
+    : {};
+
 module.exports = {
   development: {
     username: getEnv('DB_USERNAME', 'postgres'),
@@ -27,6 +34,7 @@ module.exports = {
     port: getPort(5432),
     dialect: 'postgres',
     logging: true,
+    ...sslOptions(),
   },
 
   test: {
@@ -46,5 +54,6 @@ module.exports = {
     port: getPort(5432),
     dialect: 'postgres',
     logging: false,
+    ...sslOptions(),
   }
 }; 

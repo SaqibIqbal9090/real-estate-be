@@ -415,6 +415,12 @@ export class PropertiesService {
       throw new NotFoundException(`Property with ID ${id} not found`);
     }
 
+    // MLS display compliance: off-market listings (Sold/Expired/Terminated
+    // VOW data) must never be publicly displayed, including by direct ID.
+    if (property.status === 'off_market') {
+      throw new NotFoundException(`Property with ID ${id} not found`);
+    }
+
     // Ensure all fields are properly mapped in the response
     const propertyData = property.get({ plain: true });
     const mappedProperty = this.mapPropertyToFrontendFormat(propertyData);

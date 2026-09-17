@@ -23,13 +23,24 @@ export class Property extends Model<Property> {
   })
   declare id: string;
 
-  // Property Status
+  // Property Status. 'off_market' is for MLS-imported listings whose MLS
+  // status is Sold/Expired/Terminated (VOW data): stored, never shown in
+  // public queries (which filter on 'published').
   @Column({
-    type: DataType.ENUM('draft', 'published'),
+    type: DataType.ENUM('draft', 'published', 'off_market'),
     defaultValue: 'draft',
     allowNull: false,
   })
-  status: 'draft' | 'published';
+  status: 'draft' | 'published' | 'off_market';
+
+  // Raw status from the HAR/MLS feed (Active, Option Pending, Pending
+  // Continuing to Show, Pending, Sold, Expired, Terminated). Null for
+  // user-created properties.
+  @Column({
+    type: DataType.STRING,
+    allowNull: true,
+  })
+  mlsStatus: string | null;
 
   // Ownership verification for the sell flow: a seller's claim starts as
   // 'unverified' (editing/publishing locked) until an admin verifies it.
