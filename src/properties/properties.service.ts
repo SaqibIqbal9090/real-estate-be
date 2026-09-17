@@ -278,9 +278,13 @@ export class PropertiesService {
     // originals that have a published copy so the same home never lists twice.
     if (!includeDrafts) {
       andConditions.push(
+        // The IS NOT NULL clause is redundant logically (NULL never matches an
+        // equality) but lets Postgres use the partial index on
+        // sourcePropertyId instead of hash-joining the entire table.
         Sequelize.literal(`NOT EXISTS (
           SELECT 1 FROM properties AS copies
-          WHERE copies."sourcePropertyId" = "Property"."id"
+          WHERE copies."sourcePropertyId" IS NOT NULL
+            AND copies."sourcePropertyId" = "Property"."id"
             AND copies."status" = 'published'
         )`) as any,
       );
@@ -750,9 +754,11 @@ export class PropertiesService {
             token => Sequelize.where(fullAddress, { [Op.iLike]: `%${token}%` }) as any,
           ),
           // Hide originals superseded by a published seller copy
+          // IS NOT NULL first so the partial sourcePropertyId index applies
           Sequelize.literal(`NOT EXISTS (
             SELECT 1 FROM properties AS copies
-            WHERE copies."sourcePropertyId" = "Property"."id"
+            WHERE copies."sourcePropertyId" IS NOT NULL
+              AND copies."sourcePropertyId" = "Property"."id"
               AND copies."status" = 'published'
           )`) as any,
         ],
