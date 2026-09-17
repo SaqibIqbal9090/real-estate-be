@@ -295,6 +295,11 @@ export class PropertiesService {
     // Only show published properties in public listings unless includeDrafts is true
     if (!includeDrafts) {
       where.status = 'published';
+      // Defence in depth: the importer already refuses to publish listings
+      // whose seller opted out of internet display, but enforce it at query
+      // time too. NULL means "not stated" (rows imported before this was
+      // captured) and stays visible; only an explicit false is suppressed.
+      where.internetDisplayAllowed = { [Op.not]: false };
     }
 
     // Filter by list type
@@ -490,8 +495,9 @@ export class PropertiesService {
     }
 
     // MLS display compliance: off-market listings (Sold/Expired/Terminated
-    // VOW data) must never be publicly displayed, including by direct ID.
-    if (property.status === 'off_market') {
+    // VOW data) and listings whose seller opted out of internet display must
+    // never be publicly served, including by direct ID.
+    if (property.status === 'off_market' || property.internetDisplayAllowed === false) {
       throw new NotFoundException(`Property with ID ${id} not found`);
     }
 

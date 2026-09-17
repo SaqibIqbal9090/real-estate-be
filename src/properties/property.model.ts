@@ -51,6 +51,72 @@ export class Property extends Model<Property> {
   })
   propertyCategory: string | null;
 
+  // --- MLS display consent -------------------------------------------------
+  // HAR states per listing whether it may appear on the internet. NULL means
+  // "not known" (rows imported before these were captured) and is treated as
+  // allowed; only an explicit false suppresses a listing.
+  @Column({ type: DataType.BOOLEAN, allowNull: true })
+  internetDisplayAllowed: boolean | null;
+
+  @Column({ type: DataType.BOOLEAN, allowNull: true })
+  addressDisplayAllowed: boolean | null;
+
+  // e.g. ["IDX","VOW"] — IDX means publicly displayable, VOW-only is
+  // login-gated under the Virtual Office Website rules.
+  @Column({ type: DataType.JSON, allowNull: true })
+  feedTypes: string[] | null;
+
+  // --- Incremental sync watermarks ----------------------------------------
+  @Column({ type: DataType.DATE, allowNull: true })
+  modificationTimestamp: Date | null;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  photosChangeTimestamp: Date | null;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  statusChangeTimestamp: Date | null;
+
+  @Column({ type: DataType.DATE, allowNull: true })
+  priceChangeTimestamp: Date | null;
+
+  // --- Geo (map search) ----------------------------------------------------
+  @Column({ type: DataType.DECIMAL(10, 7), allowNull: true })
+  latitude: number | null;
+
+  @Column({ type: DataType.DECIMAL(10, 7), allowNull: true })
+  longitude: number | null;
+
+  // --- Attribution & listing context --------------------------------------
+  @Column({ type: DataType.STRING, allowNull: true })
+  listOfficeName: string | null;
+
+  @Column({ type: DataType.STRING, allowNull: true })
+  listOfficePhone: string | null;
+
+  @Column({ type: DataType.DECIMAL(15, 2), allowNull: true })
+  originalListPrice: number | null;
+
+  @Column({ type: DataType.INTEGER, allowNull: true })
+  daysOnMarket: number | null;
+
+  @Column({ type: DataType.INTEGER, allowNull: true })
+  photosCount: number | null;
+
+  // MLS's own formatted address, e.g. "000 Pearland Parkway, Pearland TX 77581"
+  @Column({ type: DataType.STRING, allowNull: true })
+  unparsedAddress: string | null;
+
+  // Lot size in the unit the MLS used. `lotSize` assumes square feet and
+  // overflows for large acreage; these keep the true figure.
+  @Column({ type: DataType.DECIMAL(15, 4), allowNull: true })
+  lotSizeArea: number | null;
+
+  @Column({ type: DataType.STRING, allowNull: true })
+  lotSizeUnits: string | null;
+
+  @Column({ type: DataType.JSON, allowNull: true })
+  utilities: string[] | null;
+
   // Ownership verification for the sell flow: a seller's claim starts as
   // 'unverified' (editing/publishing locked) until an admin verifies it.
   @Column({
