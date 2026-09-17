@@ -88,6 +88,34 @@ function isPubliclyDisplayable(harListing: HarListing): boolean {
   return PUBLIC_MLS_STATUSES.includes(listingMlsStatus(harListing).trim().toLowerCase());
 }
 
+// Postgres aborts an entire statement with "numeric field overflow" when a
+// value exceeds a DECIMAL(p,s) column, so one outlier listing can kill a whole
+// bulk insert. Large-acreage listings routinely exceed lotSize DECIMAL(10,2).
+// Acreage is still preserved in the `acres` column, so drop the out-of-range
+// value instead of failing or fabricating a clamped one.
+const DECIMAL_MAX: Record<string, number> = {
+  listPrice: 9999999999999.99, // DECIMAL(15,2)
+  priceAtLotValue: 9999999999999.99, // DECIMAL(15,2)
+  lotSize: 99999999.99, // DECIMAL(10,2)
+  taxes: 99999999.99,
+  maintainanceFeeAmount: 99999999.99,
+  maintenanceFeeAmount: 99999999.99,
+  otherMandatoryFeesAmount: 99999999.99,
+  variableCompensation: 99999999.99,
+  totalTaxRate: 999999.9999, // DECIMAL(10,4)
+};
+
+function sanitizeNumerics(property: Record<string, any>): void {
+  for (const [field, max] of Object.entries(DECIMAL_MAX)) {
+    const value = property[field];
+    if (value === null || value === undefined) continue;
+    const num = Number(value);
+    if (!Number.isFinite(num) || Math.abs(num) > max) {
+      property[field] = null;
+    }
+  }
+}
+
 export { HarListing, ODataResponse, listingMlsStatus, isPubliclyDisplayable };
 
 class HarImporter {
@@ -305,6 +333,8 @@ class HarImporter {
       energyFeatures: harListing.GreenEnergyEfficient || [],
       greenEnergyCertifications: harListing.GreenBuildingVerificationType || [],
     };
+
+    sanitizeNumerics(property as Record<string, any>);
 
     return property;
   }
