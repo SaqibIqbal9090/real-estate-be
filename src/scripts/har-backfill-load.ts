@@ -65,20 +65,33 @@ function checkpointPath(file: string): string {
 
 function readCheckpoint(file: string): number {
   const p = checkpointPath(file);
-  if (fs.existsSync(p)) {
-    try {
-      return JSON.parse(fs.readFileSync(p, 'utf8')).processedLines || 0;
-    } catch {
-      /* start over */
+  if (!fs.existsSync(p)) return 0;
+  try {
+    const saved = JSON.parse(fs.readFileSync(p, 'utf8'));
+    // A re-fetch can replace a .jsonl with different (often smaller) content
+    // while the old checkpoint survives, which would silently skip the whole
+    // file. If the file shrank, the checkpoint refers to different data.
+    const currentSize = fs.statSync(file).size;
+    if (typeof saved.fileSize === 'number' && currentSize < saved.fileSize) {
+      console.log(`  ↺ ${path.basename(file)} changed since last load — restarting from line 0`);
+      return 0;
     }
+    return saved.processedLines || 0;
+  } catch {
+    return 0;
   }
-  return 0;
 }
 
 function writeCheckpoint(file: string, processedLines: number): void {
+  let fileSize = 0;
+  try {
+    fileSize = fs.statSync(file).size;
+  } catch {
+    /* file vanished mid-run; size stays 0 */
+  }
   fs.writeFileSync(
     checkpointPath(file),
-    JSON.stringify({ processedLines, updatedAt: new Date().toISOString() }, null, 2),
+    JSON.stringify({ processedLines, fileSize, updatedAt: new Date().toISOString() }, null, 2),
   );
 }
 
