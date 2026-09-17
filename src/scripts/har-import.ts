@@ -68,6 +68,28 @@ interface ODataResponse {
   '@odata.count'?: number;
 }
 
+// HRIS agreement §5a: public display is limited to these MLS statuses.
+// Everything else (Sold, Expired, Terminated — VOW data) is stored as
+// 'off_market' and excluded from public queries.
+const PUBLIC_MLS_STATUSES = [
+  'active',
+  'option pending',
+  'pending continuing to show',
+  'pending',
+  // RESO StandardStatus spellings for the same states
+  'active under contract',
+];
+
+function listingMlsStatus(harListing: HarListing): string {
+  return harListing.MlsStatus || harListing.StandardStatus || '';
+}
+
+function isPubliclyDisplayable(harListing: HarListing): boolean {
+  return PUBLIC_MLS_STATUSES.includes(listingMlsStatus(harListing).trim().toLowerCase());
+}
+
+export { HarListing, ODataResponse, listingMlsStatus, isPubliclyDisplayable };
+
 class HarImporter {
   private sequelize: Sequelize;
   private harApiUrl: string;
@@ -123,12 +145,15 @@ class HarImporter {
   }
 
   /**
-   * Maps HAR API listing data to Property model format
+   * Maps HAR API listing data to Property model format.
+   * Public so the bulk backfill loader can reuse the exact same mapping.
    */
-  private mapHarToProperty(harListing: HarListing): Partial<Property> {
+  public mapHarToProperty(harListing: HarListing): Partial<Property> {
     const property: Partial<Property> = {
       userId: this.userId,
-      status: 'published',
+      // Display compliance: only Active/Pending-family statuses go public
+      status: isPubliclyDisplayable(harListing) ? 'published' : 'off_market',
+      mlsStatus: listingMlsStatus(harListing) || null,
 
       // Listing Information
       listType: this.determineListType(harListing),

@@ -23,4 +23,10 @@ export const databaseConfig: SequelizeModuleOptions = {
     acquire: 30000,
     idle: 10000,
   },
-}; 
+};
+
+// Surface the resolved target at boot. A silent fallback to localhost is what
+// previously left the app and the HAR importer reading different databases.
+console.log(
+  `[database] connecting to host=${databaseConfig.host} db=${databaseConfig.database} ssl=${process.env.DB_SSL === 'true'}`,
+);
