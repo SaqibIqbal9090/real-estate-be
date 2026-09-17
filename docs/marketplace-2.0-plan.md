@@ -114,10 +114,26 @@ Two features are on the roadmap for the release after MVP launch. They are recor
 
 MVP groundwork that makes these cheap later: the role system extends to a Vendor role without rework; agents' zipcode-based service areas establish the location-matching pattern the vendor search reuses; and the AI-moderation pattern can also harden marketplace content over time.
 
-## 9. Risks & notes
+## 9. Infrastructure — decided Sep 17, 2026
+
+Deferred to the Marketplace 2.0 build rather than done twice. Today's backend runs on a t3.micro with pm2 and manual deploys, which caused most of the operational incidents so far (a `.env` that pm2 never loaded left the app reading a stale local Postgres for 12 days; unrotated logs filled the disk with 21 GB).
+
+| Decision | Detail |
+|---|---|
+| **Platform** | **Coolify**, not Elastic Beanstalk. Already proven on the frontend, one paradigm for both apps, env vars managed in UI, container log rotation, git-push deploys, and Redis added as a managed service in a few clicks. Beanstalk adds an ALB (~$16/mo), slower deploys, and `.ebextensions` config for autoscaling we don't need. |
+| **Instance size** | **t3.large / t4g.large** (~$61 / ~$49 per month). t3.medium is borderline once remodel lives in the same backend: Coolify ~1.5 GB + API ~0.4 + Redis ~0.3 + remodel worker ~0.4 + the HAR cron spike ~0.5 ≈ 3.1 GB steady, and a deploy build adds ~1.5 GB — over 4 GB. `t4g` (ARM) is ~20% cheaper; verify ARM builds first if ONNX/YOLO ever runs locally. |
+| **Worker separation** | Remodel BullMQ workers run as a **separate Coolify service** (same repo, different start command), so a stuck image job can't degrade API latency and workers can move to their own instance later without re-architecting. |
+| **Build server** | Coolify's "Use a Build Server?" option removes the ~1.5 GB build peak from the app host — the lever to pull if memory gets tight instead of resizing. |
+| **HAR bulk import** | Stays on a **throwaway instance** (t3.small, 50 GB volume), never the app host. The 2-hourly incremental sync is fine on the main box once filtered by `ModificationTimestamp`. |
+| **Elastic IP** | **Required.** HRIS authenticates the MLS feed by IP, so an instance restart currently breaks data ingestion. Also prevents the sslip.io/domain breakage seen previously. |
+
+Also worth doing regardless of platform: **uptime monitoring** on the properties endpoint (the 12-day outage went unnoticed because nothing watched it), alerting when a HAR import run fails, and compiling the cron importer to JS instead of running it through `ts-node` (cuts its memory spike from ~500 MB to ~150 MB).
+
+## 10. Risks & notes
 
 - **Security reset built in.** The new frontend starts from a fresh repository, which also leaves behind the malware found in the old repo's git history; secrets are rotated at cutover and the retired RemodelHomes server is terminated.
 - **SEO continuity.** Old marketplace URLs and remodelhomes.ai both need 301 maps at launch; blog and property pages are pre-rendered from day one.
-- **Infrastructure additions.** One Redis container (job queue) and the `STABILITY_API_KEY` move into the marketplace deployment; a static IP on the server prevents the domain breakage seen previously.
+- **Infrastructure additions.** One Redis container (job queue) and the `STABILITY_API_KEY` move into the marketplace deployment. Sizing and platform are settled in §9.
+- **MLS display compliance.** The HRIS/HAR licence limits public display to Active and the three Pending statuses; Sold/Expired/Terminated (the VOW tier) may only appear behind a login. Every page showing MLS data must carry the attribution line `Data provided by HAR.com © Copyright <year> "All information provided should be independently verified."`, a DMCA agent must be designated, and MLS data must never be sent to third-party AI — which constrains the remodel module to user-uploaded photos only.
 - **Empty-room quality.** The Stability-only approach ships first; if results underperform the current YOLO-masked pipeline, the ONNX port is a contained ~3-day follow-up.
 - **Admin dashboard scope.** The back-office is the largest new surface; the estimate assumes functional, clean UI — not a bespoke design showcase.

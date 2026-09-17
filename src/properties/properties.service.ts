@@ -207,6 +207,7 @@ export class PropertiesService {
    * the count off the critical path for virtually every request.
    */
   private static countCache = new Map<string, { value: number; at: number }>();
+  private static countInFlight = new Map<string, Promise<number>>();
   private static readonly COUNT_TTL_MS = 120_000;
   private static readonly COUNT_CACHE_MAX = 200;
 
@@ -217,15 +218,35 @@ export class PropertiesService {
       return hit.value;
     }
 
-    const value = await this.propertyModel.count({ where });
+    // Collapse concurrent misses onto one query. Without this, every request
+    // arriving during a slow count starts its own, exhausting the connection
+    // pool and saturating the database — which then makes the count slower
+    // still, so the cache never populates and the endpoint never recovers.
+    const existing = PropertiesService.countInFlight.get(key);
+    if (existing) return existing;
 
-    // Bound the cache so unusual filter combinations can't grow it forever.
-    if (PropertiesService.countCache.size >= PropertiesService.COUNT_CACHE_MAX) {
-      const oldest = PropertiesService.countCache.keys().next().value;
-      if (oldest !== undefined) PropertiesService.countCache.delete(oldest);
-    }
-    PropertiesService.countCache.set(key, { value, at: now });
-    return value;
+    const pending = this.propertyModel
+      .count({ where })
+      .then((value) => {
+        if (PropertiesService.countCache.size >= PropertiesService.COUNT_CACHE_MAX) {
+          const oldest = PropertiesService.countCache.keys().next().value;
+          if (oldest !== undefined) PropertiesService.countCache.delete(oldest);
+        }
+        PropertiesService.countCache.set(key, { value, at: Date.now() });
+        return value;
+      })
+      .catch((error) => {
+        // A failing count must never fail the listing request: serve the last
+        // known total (stale is fine for pagination) or fall back to 0.
+        console.warn(`Property count failed, serving stale total: ${error.message}`);
+        return hit?.value ?? 0;
+      })
+      .finally(() => {
+        PropertiesService.countInFlight.delete(key);
+      });
+
+    PropertiesService.countInFlight.set(key, pending);
+    return pending;
   }
 
   async findAll(options: {
