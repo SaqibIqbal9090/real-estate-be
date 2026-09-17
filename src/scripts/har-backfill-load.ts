@@ -110,8 +110,24 @@ async function processBatch(importer: HarImporter, batch: HarListing[]): Promise
     }
   }
   if (toInsert.length > 0) {
-    await Property.bulkCreate(toInsert, { validate: false });
-    totals.inserted += toInsert.length;
+    try {
+      await Property.bulkCreate(toInsert, { validate: false });
+      totals.inserted += toInsert.length;
+    } catch (err: any) {
+      // One malformed listing (e.g. a value that overflows a DECIMAL column)
+      // fails the whole multi-row INSERT. Fall back to inserting individually
+      // so a single bad record costs one row, not the entire run.
+      console.warn(`  ⚠️  Batch insert failed (${err.message}) — retrying rows individually`);
+      for (const row of toInsert) {
+        try {
+          await Property.create(row, { validate: false });
+          totals.inserted++;
+        } catch (rowErr: any) {
+          totals.errors++;
+          console.error(`  ❌ Skipped ${row.mlsNumber}: ${rowErr.message}`);
+        }
+      }
+    }
   }
 
   // 2. Reconcile status on listings we already have (repairs earlier imports
@@ -175,7 +191,12 @@ async function loadFile(importer: HarImporter, file: string): Promise<void> {
       continue;
     }
     if (batch.length >= BATCH_SIZE) {
-      await processBatch(importer, batch);
+      try {
+        await processBatch(importer, batch);
+      } catch (err: any) {
+        totals.errors += batch.length;
+        console.error(`  ❌ Batch ending at line ${lineNo} failed: ${err.message}`);
+      }
       processed = lineNo;
       writeCheckpoint(file, processed);
       process.stdout.write(
@@ -186,7 +207,12 @@ async function loadFile(importer: HarImporter, file: string): Promise<void> {
     }
   }
   if (batch.length > 0) {
-    await processBatch(importer, batch);
+    try {
+      await processBatch(importer, batch);
+    } catch (err: any) {
+      totals.errors += batch.length;
+      console.error(`  ❌ Final batch of ${path.basename(file)} failed: ${err.message}`);
+    }
     writeCheckpoint(file, lineNo);
   }
   console.log(`✅ ${path.basename(file)} done (${lineNo} lines)`);
