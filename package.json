@@ -27,6 +27,7 @@
     "har:import": "ts-node -r tsconfig-paths/register src/scripts/har-import.ts",
     "har:backfill:fetch": "ts-node -r tsconfig-paths/register src/scripts/har-backfill-fetch.ts",
     "har:backfill:load": "ts-node -r tsconfig-paths/register src/scripts/har-backfill-load.ts",
+    "properties:backfill-category": "ts-node -r tsconfig-paths/register src/scripts/backfill-property-category.ts",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",

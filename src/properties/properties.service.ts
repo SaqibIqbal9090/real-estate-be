@@ -5,6 +5,7 @@ import { SellRequest } from '../sell-requests/sell-request.model';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { Op } from 'sequelize';
 import { Sequelize } from 'sequelize';
+import { normalizePropertyCategory } from './property-category';
 
 @Injectable()
 export class PropertiesService {
@@ -365,17 +366,22 @@ export class PropertiesService {
       });
     }
 
-    // Filter by property type (propertyType is stored as JSON array)
+    // Filter by property category. Previously this scanned the propertyType
+    // JSON array per row (~5s) and, because the UI's codes never matched HAR's
+    // raw strings, returned nothing. Listings now carry a canonical, indexed
+    // propertyCategory assigned at import.
     if (propertyType) {
-      const propertyTypes = Array.isArray(propertyType) ? propertyType : [propertyType];
-      const propertyTypeConditions = propertyTypes.map((type: string) => {
-        // Check if the JSON array contains the property type (case-insensitive)
-        return Sequelize.literal(`EXISTS (
-          SELECT 1 FROM jsonb_array_elements_text("propertyType"::jsonb) AS element
-          WHERE LOWER(element) = LOWER('${type.replace(/'/g, "''")}')
-        )`);
-      });
-      andConditions.push({ [Op.or]: propertyTypeConditions });
+      const requested = (Array.isArray(propertyType) ? propertyType : [propertyType])
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean);
+
+      const categories = Array.from(
+        new Set(requested.map((value) => normalizePropertyCategory(value)).filter(Boolean)),
+      ) as string[];
+
+      if (categories.length > 0) {
+        andConditions.push({ propertyCategory: { [Op.in]: categories } });
+      }
     }
 
     // Filter by bedrooms (bedrooms is stored as INTEGER after migration)
